@@ -5,7 +5,9 @@ A light, open-source screen recorder. Pick a mode, press record, done. Windows t
 - **Bar:** a command bar, bottom centre. Type a window name to record it. Alt+Shift+R opens it, or stops a recording.
 - **Modes:** the screen, the screen with your face, just your face, or any window.
 - **Island:** while recording, a small capsule at the top shows the time and a Stop button. It never shows up in the video.
-- **3.3 MB app.** Hardware H.264 through Windows' own encoder.
+- **Sound:** what the computer plays, and your mic. Face modes turn the mic on.
+- **Face box:** drag it anywhere, scroll to resize, double-click for a circle. It shows in the video.
+- **Small app.** Hardware H.264 + AAC through Windows' own encoder.
 
 ## Let an agent drive it
 

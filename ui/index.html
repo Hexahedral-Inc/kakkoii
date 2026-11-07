@@ -74,12 +74,14 @@
   const ORDER = ['balanced', 'high', 'small'];
   const BROWSERS = /chrome|msedge|firefox|brave|opera|vivaldi|arc/i;
   let quality = localStorage.getItem('quality') || 'balanced';
+  const sound = { system: localStorage.getItem('sound.system') !== 'off', mic: localStorage.getItem('sound.mic') === 'on' };
+  const toggleSound = (k) => { sound[k] = !sound[k]; localStorage.setItem('sound.' + k, sound[k] ? 'on' : 'off'); render(); };
   let state = { recording: false, camera: false };
   let windows = [], files = 0, sel = 0, shown = [], top = null;
 
   const hide = () => { $('q').value = ''; sel = 0; void win.hide(); };
   const record = async (opts) => {
-    try { top = null; await invoke('start_recording', { opts: { quality, ...opts } }); $('q').value = ''; }
+    try { top = null; await invoke('start_recording', { opts: { quality, sound: { ...sound }, ...opts } }); $('q').value = ''; }
     catch (e) { top = { err: String(e) }; render(); }
   };
 
@@ -91,10 +93,12 @@
     }));
     const base = [
       { id: 'screen', icon: 'screen', text: 'Record the screen', hint: 'enter', run: () => record({ target: { kind: 'screen' } }) },
-      { id: 'face', icon: 'face', text: 'Record the screen with my face', hint: 'face', run: () => record({ target: { kind: 'screen' }, camera: true }) },
-      { id: 'faceonly', icon: 'camera', text: 'Record just my face', hint: 'camera', run: () => record({ target: { kind: 'face' } }) },
+      { id: 'face', icon: 'face', text: 'Record the screen with my face', hint: 'face', run: () => record({ target: { kind: 'screen' }, camera: true, sound: { ...sound, mic: true } }) },
+      { id: 'faceonly', icon: 'camera', text: 'Record just my face', hint: 'camera', run: () => record({ target: { kind: 'face' }, sound: { ...sound, mic: true } }) },
     ];
     const tail = [
+      { id: 'system', icon: sound.system ? 'speaker' : 'speakerOff', text: sound.system ? 'Record the computer\'s sound' : 'Computer sound is off', hint: sound.system ? 'on' : 'off', on: sound.system, keep: true, run: () => toggleSound('system') },
+      { id: 'mic', icon: sound.mic ? 'mic' : 'micOff', text: sound.mic ? 'Record my microphone' : 'Microphone is off', hint: sound.mic ? 'on' : 'off', on: sound.mic, keep: true, run: () => toggleSound('mic') },
       { id: 'quality', icon: 'quality', text: `Quality: ${QUALITY[quality]}`, hint: 'change', keep: true,
         run: () => { quality = ORDER[(ORDER.indexOf(quality) + 1) % ORDER.length]; localStorage.setItem('quality', quality); render(); } },
       { id: 'bubble', icon: state.camera ? 'cameraOff' : 'camera', text: state.camera ? 'Hide my face bubble' : 'Show my face bubble', hint: state.camera ? 'on' : 'off', on: state.camera, keep: true,

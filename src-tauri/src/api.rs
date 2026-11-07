@@ -140,6 +140,11 @@ fn normalise_target(mut args: Value) -> Value {
             _ => json!({ "kind": "window", "query": t }),
         };
     }
+    let system = args.get("system_audio").and_then(Value::as_bool);
+    let mic = args.get("mic").and_then(Value::as_bool);
+    if system.is_some() || mic.is_some() {
+        args["sound"] = json!({ "system": system.unwrap_or(true), "mic": mic.unwrap_or(false) });
+    }
     if let Some(i) = args.get("monitor").and_then(Value::as_u64) {
         args["target"] = json!({ "kind": "monitor", "index": i });
     }
@@ -160,6 +165,8 @@ fn tools() -> Value {
               "quality": { "type": "string", "enum": ["high", "balanced", "small"], "description": "small = 30 fps, light files" },
               "camera": { "type": "boolean", "description": "Show the face bubble on screen while recording." },
               "max_seconds": { "type": "integer", "description": "Stop on its own after this many seconds." },
+              "system_audio": { "type": "boolean", "description": "Record what the computer plays (default true)." },
+              "mic": { "type": "boolean", "description": "Record the microphone (default false)." },
               "name": { "type": "string", "description": "File name without extension." }
           } } },
         { "name": "stop_recording", "description": "Stop and save. Returns the file path, length and size.",

@@ -49,6 +49,30 @@ pub enum Target {
     Hwnd { hwnd: isize },
 }
 
+/// Which sound goes in the video.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub struct Sound {
+    /// What the computer plays. On unless turned off.
+    #[serde(default = "yes")]
+    pub system: bool,
+    /// The microphone.
+    #[serde(default)]
+    pub mic: bool,
+}
+fn yes() -> bool {
+    true
+}
+impl Default for Sound {
+    fn default() -> Self {
+        Self { system: true, mic: false }
+    }
+}
+impl Sound {
+    pub fn any(self) -> bool {
+        self.system || self.mic
+    }
+}
+
 /// Size versus sharpness. Bits per pixel per frame, times fps.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -162,6 +186,7 @@ pub struct Session {
     control: CaptureControl<Rec, BoxError>,
     stop: Arc<AtomicBool>,
     tail: Arc<std::sync::Mutex<Option<Duration>>>,
+    audio: Option<crate::audio::Audio>,
     pub path: String,
     pub label: String,
 }
@@ -201,7 +226,7 @@ where
     Rec::start_free_threaded(settings).map_err(|e| e.to_string())
 }
 
-fn encoder(w: u32, h: u32, quality: Quality, path: &str) -> Result<VideoEncoder, String> {
+fn encoder(w: u32, h: u32, quality: Quality, sound: bool, path: &str) -> Result<VideoEncoder, String> {
     // H.264 wants even sizes. Frames that differ later get padded by the encoder.
     let (w, h) = (w.max(2) & !1, h.max(2) & !1);
     VideoEncoder::new(
@@ -209,7 +234,8 @@ fn encoder(w: u32, h: u32, quality: Quality, path: &str) -> Result<VideoEncoder,
             .sub_type(VideoSettingsSubType::H264)
             .frame_rate(quality.fps())
             .bitrate(quality.bitrate(w, h)),
-        AudioSettingsBuilder::default().disabled(true),
+        // 48 kHz stereo 16-bit in, AAC out: what audio.rs hands over.
+        AudioSettingsBuilder::default().disabled(!sound),
         ContainerSettingsBuilder::default(),
         path,
     )
@@ -220,13 +246,13 @@ fn window_size(w: &Window) -> (u32, u32) {
     (w.width().unwrap_or(1280).max(2) as u32, w.height().unwrap_or(720).max(2) as u32)
 }
 
-pub fn start(target: &Target, quality: Quality, path: String) -> Result<Session, String> {
+pub fn start(target: &Target, quality: Quality, sound: Sound, path: String) -> Result<Session, String> {
     let stop = Arc::new(AtomicBool::new(false));
     let tail = Arc::new(std::sync::Mutex::new(None));
     let slot = Arc::new(std::sync::Mutex::new(None));
     let flags = Flags { encoder: slot.clone(), quality, stop: stop.clone(), tail: tail.clone() };
     let ready = |w: u32, h: u32| -> Result<(), String> {
-        *slot.lock().unwrap() = Some(encoder(w, h, quality, &path)?);
+        *slot.lock().unwrap() = Some(encoder(w, h, quality, sound.any(), &path)?);
         Ok(())
     };
     let (control, label) = match target {
@@ -262,7 +288,16 @@ pub fn start(target: &Target, quality: Quality, path: String) -> Result<Session,
             (launch(w, flags)?, label)
         }
     };
-    Ok(Session { control, stop, tail, path, label })
+    // Sound goes straight into the encoder the capture thread owns.
+    let audio = sound.any().then(|| {
+        let rec = control.callback();
+        crate::audio::Audio::start(sound.system, sound.mic, move |pcm| {
+            if let Some(enc) = rec.lock().encoder.as_mut() {
+                let _ = enc.send_audio_buffer(pcm, 0);
+            }
+        })
+    });
+    Ok(Session { control, stop, tail, audio, path, label })
 }
 
 impl Session {
@@ -272,8 +307,11 @@ impl Session {
 
     /// Asks the capture thread to finish the file on its next frame. A still
     /// screen sends no frames, so after 3 s we stop it outright.
-    pub fn stop(self) -> Result<String, String> {
+    pub fn stop(mut self) -> Result<String, String> {
         log(format!("session stop called ({})", self.path));
+        if let Some(a) = self.audio.take() {
+            a.stop();
+        }
         self.stop.store(true, Ordering::Relaxed);
         // A frame that arrives now saves the file itself. If the target is still,
         // none will, so we finish it from here with the held frame.

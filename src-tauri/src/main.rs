@@ -3,6 +3,8 @@
 #[cfg(windows)]
 mod api;
 #[cfg(windows)]
+mod audio;
+#[cfg(windows)]
 mod engine;
 #[cfg(windows)]
 mod mp4tail;
@@ -137,7 +139,7 @@ fn main() {
             Some(q) => recorder::Target::Window { query: q.clone() },
             None => recorder::Target::Screen,
         };
-        let session = recorder::start(&target, recorder::Quality::Balanced, out).expect("start");
+        let session = recorder::start(&target, recorder::Quality::Balanced, recorder::Sound::default(), out).expect("start");
         std::thread::sleep(std::time::Duration::from_secs(secs));
         println!("{}", session.stop().expect("stop"));
         return;

@@ -22,6 +22,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-capture = "2"
+wasapi = "0.27"
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
 [features]

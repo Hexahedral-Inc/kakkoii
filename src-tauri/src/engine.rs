@@ -20,6 +20,9 @@ pub struct StartOpts {
     pub target: Target,
     #[serde(default)]
     pub quality: Quality,
+    /// System sound on, mic off, unless asked.
+    #[serde(default)]
+    pub sound: recorder::Sound,
     /// Show the face bubble (it is recorded as part of the screen).
     pub camera: Option<bool>,
     /// Stop on its own after this many seconds.
@@ -116,7 +119,7 @@ impl Engine {
             let mut inner = self.inner.lock().unwrap();
             let name = opts.name.as_deref().map(safe_name).unwrap_or_else(|| format!("kakkoii-{}", now_secs()));
             let path = dir.join(format!("{name}.mp4")).to_string_lossy().into_owned();
-            let mut session = recorder::start(&opts.target, opts.quality, path)?;
+            let mut session = recorder::start(&opts.target, opts.quality, opts.sound, path)?;
             if face_only {
                 session.label = "Your face".into();
             }
