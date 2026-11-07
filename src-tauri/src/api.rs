@@ -92,6 +92,7 @@ fn handle(mut req: Request, engine: &Arc<Engine>, token: &str) {
         (Method::Post, "/v1/resume") => engine.pause(false),
         (Method::Post, "/v1/camera") => call(engine, "camera", body),
         (Method::Post, "/v1/compress") => call(engine, "compress", body),
+        (Method::Post, "/v1/trim") => call(engine, "trim", body),
         _ => return reply(req, 404, json!({ "error": "unknown route", "routes": ROUTES })),
     };
     match result {
@@ -102,7 +103,7 @@ fn handle(mut req: Request, engine: &Arc<Engine>, token: &str) {
 
 const ROUTES: &[&str] = &[
     "GET /health", "GET /v1/status", "GET /v1/targets", "GET /v1/recordings",
-    "POST /v1/record", "POST /v1/stop", "POST /v1/camera", "POST /v1/compress", "POST /mcp",
+    "POST /v1/record", "POST /v1/stop", "POST /v1/camera", "POST /v1/compress", "POST /v1/trim", "POST /mcp",
 ];
 
 /// One dispatcher for REST and MCP tool calls.
@@ -130,6 +131,15 @@ fn call(engine: &Arc<Engine>, tool: &str, args: Value) -> Result<Value, String> 
                 args.get("gif").and_then(Value::as_bool).unwrap_or(false),
             )
         }
+        "trim" => {
+            let secs = |k| args.get(k).and_then(Value::as_f64);
+            engine.trim(
+                args.get("file").and_then(Value::as_str).map(String::from),
+                secs("start").unwrap_or(0.0),
+                secs("end").unwrap_or(f64::MAX),
+            )
+        }
+        "open_trim" => engine.open_trim(args.get("file").and_then(Value::as_str).map(String::from)).map(|_| json!({ "opened": true })),
         _ => Err(format!("unknown tool {tool}")),
     }
 }
@@ -193,7 +203,15 @@ fn tools() -> Value {
               "file": { "type": "string" },
               "quality": { "type": "string", "enum": ["balanced", "small"] },
               "gif": { "type": "boolean" }
-          } } }
+          } } },
+        { "name": "trim", "description": "Cut a recording to start..end seconds, losslessly (no re-encode), into a new <name>-trim.mp4. Defaults to the last recording; leave out end to keep to the end.",
+          "inputSchema": { "type": "object", "properties": {
+              "file": { "type": "string" },
+              "start": { "type": "number", "description": "seconds from the start" },
+              "end": { "type": "number", "description": "seconds from the start" }
+          } } },
+        { "name": "open_trim", "description": "Open the trim window on screen so the user can cut a recording by hand. Defaults to the last recording.",
+          "inputSchema": { "type": "object", "properties": { "file": { "type": "string" } } } }
     ])
 }
 

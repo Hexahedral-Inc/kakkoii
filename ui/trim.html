@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Kakkoii trim</title>
+<link rel="stylesheet" href="theme.css" />
+<style>
+  html, body { height: 100%; }
+  .panel { height: 100%; display: flex; flex-direction: column; background: var(--raised); border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
+    animation: rise .26s cubic-bezier(.2, 1, .3, 1) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px) scale(.985) } }
+  .head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 16px; border-bottom: 1px solid var(--line); }
+  .mark { width: 18px; height: 18px; border-radius: 5px; box-shadow: 0 0 0 1px var(--line); }
+  .name { flex: 1; min-width: 0; font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .name b { color: var(--text); font-weight: 600; }
+  .x { width: 28px; height: 28px; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: var(--text-2); display: grid; place-items: center; cursor: pointer; }
+  .x:hover { color: #fff; background: rgba(255,255,255,.06); }
+
+  .stage { flex: 1; min-height: 0; background: #000; position: relative; }
+  video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+
+  .bar { padding: 14px 16px 6px; }
+  .tl { position: relative; height: 54px; border-radius: 10px; overflow: hidden; background: #111; cursor: pointer; }
+  .strip { position: absolute; inset: 0; display: flex; }
+  .strip canvas { flex: 1; min-width: 0; height: 100%; display: block; }
+  .shade { position: absolute; top: 0; bottom: 0; background: rgba(0,0,0,.66); pointer-events: none; }
+  .sel { position: absolute; top: 0; bottom: 0; border-top: 2px solid #fff; border-bottom: 2px solid #fff; pointer-events: none; }
+  .hd { position: absolute; top: 0; bottom: 0; width: 14px; background: #fff; cursor: ew-resize; display: grid; place-items: center; z-index: 2; }
+  .hd::after { content: ''; width: 2px; height: 16px; border-radius: 1px; background: #000; opacity: .55; }
+  .hd.l { border-radius: 10px 0 0 10px; }
+  .hd.r { border-radius: 0 10px 10px 0; }
+  .ph { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: var(--rec); pointer-events: none; z-index: 3; box-shadow: 0 0 0 1px rgba(0,0,0,.4); }
+
+  .foot { display: flex; align-items: center; gap: 12px; padding: 10px 16px 14px; }
+  .play { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line-strong); background: transparent; color: #fff; display: grid; place-items: center; cursor: pointer;
+    transition: transform .3s var(--spring), background .15s; }
+  .play:hover { background: rgba(255,255,255,.08); }
+  .play:active { transform: scale(.9); }
+  .time { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .time b { color: var(--text); font-weight: 500; }
+  .keys { flex: 1; font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .btn { height: 32px; padding: 0 14px; border-radius: 99px; border: 1px solid var(--line-strong); background: transparent; color: #fff; font: inherit; font-size: 12.5px; font-weight: 600;
+    cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 7px; transition: background .15s, transform .3s var(--spring); }
+  .btn:hover { background: rgba(255,255,255,.08); }
+  .btn:active { transform: scale(.95); }
+  .btn.go { background: #fff; color: #000; border-color: #fff; }
+  .btn.go:hover { background: #e4e4e7; }
+  .btn[disabled] { opacity: .5; pointer-events: none; }
+  .note { margin: 0 16px 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); display: flex; align-items: center; gap: 10px; font-size: 12.5px;
+    animation: chipIn .25s ease-out both; }
+  .note.err { border-color: rgba(239,68,68,.45); color: #fca5a5; }
+  .note .ok { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: rgba(34,197,94,.16); color: var(--green); flex: none; }
+  .note .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .note .m { color: var(--muted); }
+  .chip { font: inherit; font-size: 11.5px; font-weight: 650; color: #fff; padding: 4px 11px; border-radius: 99px; border: 1px solid var(--line-strong); background: transparent; cursor: pointer; }
+  .chip:hover { background: rgba(255,255,255,.08); }
+  @keyframes chipIn { from { opacity: 0; transform: translateY(4px) } }
+</style>
+</head>
+<body>
+<div class="panel">
+  <div class="head" data-tauri-drag-region>
+    <img class="mark" src="logo.svg" alt="" data-tauri-drag-region />
+    <div class="name" id="name" data-tauri-drag-region></div>
+    <button class="x" id="close" title="Close (Esc)"></button>
+  </div>
+  <div class="stage"><video id="v" preload="auto"></video></div>
+  <div class="bar">
+    <div class="tl" id="tl">
+      <div class="strip" id="strip"></div>
+      <div class="shade" id="shL"></div><div class="shade" id="shR"></div>
+      <div class="sel" id="sel"></div>
+      <div class="hd l" id="hL" title="Start (I)"></div><div class="hd r" id="hR" title="End (O)"></div>
+      <div class="ph" id="ph"></div>
+    </div>
+  </div>
+  <div id="note"></div>
+  <div class="foot">
+    <button class="play" id="play" title="Play (Space)"></button>
+    <span class="time mono" id="time"></span>
+    <span class="keys mono">space play · i / o set start / end · ← → frame · enter save</span>
+    <button class="btn" id="cancel">Cancel</button>
+    <button class="btn go" id="save">Save trimmed copy</button>
+  </div>
+</div>
+
+<script type="module">
+  import { icon } from './icons.js';
+  const { invoke, convertFileSrc } = window.__TAURI__.core;
+  const win = window.__TAURI__.window.getCurrentWindow();
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+  const file = new URLSearchParams(location.search).get('f') || '';
+  const v = $('v');
+  const HW = 14; // handle width
+  let dur = 0, a = 0, b = 0, drag = null, saving = false;
+
+  $('name').innerHTML = `Trim <b>${esc(file.split(/[\\/]/).pop())}</b> · the original is kept`;
+  $('close').innerHTML = icon('x', 12);
+  const fmt = (s) => { const d = Math.floor(s * 10) / 10; return `${Math.floor(d / 60)}:${(d % 60).toFixed(1).padStart(4, '0')}`; };
+  const close = async () => { await invoke('show_bar'); await win.close(); };
+
+  v.src = convertFileSrc(file);
+  v.addEventListener('loadedmetadata', () => { dur = v.duration; a = 0; b = dur; paint(); void filmstrip(); });
+  v.addEventListener('error', () => note({ err: 'Could not open this recording.' }));
+  v.addEventListener('timeupdate', () => { if (!v.paused && v.currentTime >= b) { v.pause(); v.currentTime = b; } paint(); });
+  v.addEventListener('play', paint);
+  v.addEventListener('pause', paint);
+
+  // The track: [handle][ frames ][handle]; times map onto the inner part.
+  const inner = () => { const r = $('tl').getBoundingClientRect(); return { x: r.left + HW, w: r.width - 2 * HW }; };
+  const tAt = (clientX) => { const { x, w } = inner(); return Math.max(0, Math.min(dur, ((clientX - x) / w) * dur)); };
+  const px = (t) => HW + (dur ? t / dur : 0) * inner().w;
+
+  function paint() {
+    if (!dur) return;
+    const la = px(a), lb = px(b), full = $('tl').clientWidth;
+    $('hL').style.left = `${la - HW}px`;
+    $('hR').style.left = `${lb}px`;
+    $('shL').style.left = '0px'; $('shL').style.width = `${la - HW}px`;
+    $('shR').style.left = `${lb + HW}px`; $('shR').style.width = `${Math.max(0, full - lb - HW)}px`;
+    $('sel').style.left = `${la}px`; $('sel').style.width = `${lb - la}px`;
+    $('ph').style.left = `${px(v.currentTime)}px`;
+    $('time').innerHTML = `<b>${fmt(v.currentTime)}</b> · keep ${fmt(b - a)} of ${fmt(dur)}`;
+    $('play').innerHTML = icon(v.paused ? 'play' : 'pause', 13);
+  }
+
+  // A row of stills from a second, hidden copy of the video.
+  async function filmstrip() {
+    const n = Math.max(6, Math.round(inner().w / 90));
+    const strip = $('strip');
+    strip.style.left = `${HW}px`; strip.style.right = `${HW}px`;
+    strip.innerHTML = '';
+    const cs = Array.from({ length: n }, () => { const c = document.createElement('canvas'); strip.appendChild(c); return c; });
+    const g = document.createElement('video');
+    g.muted = true; g.preload = 'auto'; g.src = v.src;
+    await new Promise((r) => g.addEventListener('loadeddata', r, { once: true }));
+    for (let i = 0; i < n; i++) {
+      g.currentTime = Math.min(dur - 0.05, ((i + 0.5) / n) * dur);
+      await new Promise((r) => g.addEventListener('seeked', r, { once: true }));
+      const c = cs[i], h = 54 * devicePixelRatio, w = Math.round(h * (g.videoWidth / g.videoHeight));
+      c.width = w; c.height = h;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(g, 0, 0, w, h);
+      c.style.objectFit = 'cover';
+    }
+    g.removeAttribute('src'); g.load();
+  }
+
+  const seek = (t) => { v.currentTime = Math.max(0, Math.min(dur, t)); paint(); };
+  $('tl').addEventListener('pointerdown', (e) => {
+    if (!dur) return;
+    $('tl').setPointerCapture(e.pointerId);
+    drag = e.target === $('hL') ? 'a' : e.target === $('hR') ? 'b' : 'p';
+    move(e);
+  });
+  $('tl').addEventListener('pointermove', (e) => { if (drag) move(e); });
+  $('tl').addEventListener('pointerup', () => { drag = null; });
+  const GAP = 0.2;
+  function move(e) {
+    const t = tAt(e.clientX);
+    if (drag === 'a') { a = Math.min(t, b - GAP); seek(a); }
+    else if (drag === 'b') { b = Math.max(t, a + GAP); seek(b); }
+    else { if (!v.paused) v.pause(); seek(t); }
+  }
+
+  const toggle = () => {
+    if (!dur) return;
+    if (v.paused) { if (v.currentTime < a || v.currentTime >= b - 0.02) v.currentTime = a; void v.play(); } else v.pause();
+  };
+  $('play').onclick = toggle;
+  $('cancel').onclick = close;
+  $('close').onclick = close;
+
+  function note(n) {
+    $('note').innerHTML = !n ? '' : n.err ? `<div class="note err"><span class="t">${esc(n.err)}</span></div>`
+      : `<div class="note"><span class="ok">${icon('check', 11)}</span><span class="t">${esc(n.file.split(/[\\/]/).pop())} <span class="m mono">· ${fmt(n.seconds)} · ${(n.bytes / 1e6).toFixed(1)} MB</span></span><button class="chip" id="show">Show</button><button class="chip" id="copy">Copy path</button></div>`;
+    if (n?.file) {
+      $('show').onclick = () => void invoke('reveal', { path: n.file });
+      $('copy').onclick = async () => { await navigator.clipboard.writeText(n.file); $('copy').textContent = 'Copied'; };
+    }
+  }
+
+  async function save() {
+    if (!dur || saving) return;
+    saving = true; $('save').disabled = true; $('save').textContent = 'Saving…';
+    try {
+      // The whole clip asked for: just say so, nothing to cut.
+      const end = b >= dur - 0.01 ? 1e9 : b;
+      note(await invoke('trim_recording', { file, start: a, end }));
+    } catch (e) { note({ err: String(e) }); }
+    saving = false; $('save').disabled = false; $('save').textContent = 'Save trimmed copy';
+  }
+  $('save').onclick = save;
+
+  const FRAME = 1 / 60;
+  addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); void close(); }
+    else if (e.key === ' ') { e.preventDefault(); toggle(); }
+    else if (e.key === 'Enter') { e.preventDefault(); void save(); }
+    else if (e.key === 'i' || e.key === 'I') { a = Math.min(v.currentTime, b - GAP); paint(); }
+    else if (e.key === 'o' || e.key === 'O') { b = Math.max(v.currentTime, a + GAP); paint(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); v.pause(); seek(v.currentTime - (e.shiftKey ? 1 : FRAME)); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); v.pause(); seek(v.currentTime + (e.shiftKey ? 1 : FRAME)); }
+  });
+  addEventListener('resize', paint);
+  win.setFocus();
+</script>
+</body>
+</html>

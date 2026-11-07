@@ -361,6 +361,67 @@ impl Engine {
         Ok(json!({ "dir": dir.to_string_lossy(), "files": files }))
     }
 
+    /// A lossless copy of `start..end` seconds as <name>-trim.mp4 (then -trim2, ...).
+    pub fn trim(&self, file: Option<String>, start: f64, end: f64) -> Result<Value, String> {
+        let src = file
+            .or_else(|| self.inner.lock().unwrap().last.clone())
+            .ok_or("no file given and nothing recorded yet")?;
+        let src_path = Path::new(&src);
+        if !src_path.exists() {
+            return Err(format!("{src} does not exist"));
+        }
+        let stem = src_path.file_stem().unwrap_or_default().to_string_lossy();
+        let out = (1..)
+            .map(|n| src_path.with_file_name(if n == 1 { format!("{stem}-trim.mp4") } else { format!("{stem}-trim{n}.mp4") }))
+            .find(|p| !p.exists())
+            .unwrap();
+        let cut = crate::trim::trim(src_path, &out, start.max(0.0), end).inspect_err(|_| {
+            let _ = std::fs::remove_file(&out);
+        })?;
+        let bytes = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+        recorder::log(&format!("trim {src} {:.2}..{:.2}", cut.start, cut.end));
+        Ok(json!({ "file": out.to_string_lossy(), "start": cut.start, "end": cut.end, "seconds": cut.end - cut.start, "bytes": bytes }))
+    }
+
+    /// The trim window: the recording, a timeline with two handles, Save.
+    pub fn open_trim(&self, file: Option<String>) -> Result<(), String> {
+        let file = file.or_else(|| self.inner.lock().unwrap().last.clone()).ok_or("nothing recorded yet")?;
+        if let Some(bar) = self.app.get_webview_window("main") {
+            let _ = bar.hide();
+        }
+        if let Some(w) = self.app.get_webview_window("trim") {
+            let _ = w.close();
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+        let enc: String = file.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
+        let (ax, ay, aw, ah) = self
+            .app
+            .primary_monitor()
+            .ok()
+            .flatten()
+            .map(|m| {
+                let s = m.scale_factor();
+                let r = m.work_area();
+                (r.position.x as f64 / s, r.position.y as f64 / s, r.size.width as f64 / s, r.size.height as f64 / s)
+            })
+            .unwrap_or((0.0, 0.0, 1920.0, 1040.0));
+        let (w, h) = (aw.min(980.0), ah.min(680.0));
+        WebviewWindowBuilder::new(&self.app, "trim", WebviewUrl::App(format!("trim.html?f={enc}").into()))
+            .title("Kakkoii trim")
+            .inner_size(w, h)
+            .position(ax + (aw - w) / 2.0, ay + (ah - h) / 2.0)
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .always_on_top(true)
+            .resizable(false)
+            .focused(true)
+            .additional_browser_args(BROWSER_ARGS)
+            .build()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     /// Re-encodes a recording smaller with ffmpeg (if installed). `quality` small | balanced.
     pub fn compress(&self, file: Option<String>, quality: Quality, gif: bool) -> Result<Value, String> {
         let src = file

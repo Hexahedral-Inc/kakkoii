@@ -10,6 +10,8 @@ mod engine;
 mod mp4tail;
 #[cfg(windows)]
 mod recorder;
+#[cfg(windows)]
+mod trim;
 
 #[cfg(windows)]
 use std::sync::Arc;
@@ -82,6 +84,18 @@ async fn recordings(engine: State<'_, Arc<Engine>>) -> Result<serde_json::Value,
 
 #[cfg(windows)]
 #[tauri::command]
+async fn trim_recording(engine: State<'_, Arc<Engine>>, file: String, start: f64, end: f64) -> Result<serde_json::Value, String> {
+    engine.trim(Some(file), start, end)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+async fn open_trim(engine: State<'_, Arc<Engine>>, file: Option<String>) -> Result<(), String> {
+    engine.open_trim(file)
+}
+
+#[cfg(windows)]
+#[tauri::command]
 fn agent_command() -> String {
     api::mcp_command()
 }
@@ -92,6 +106,12 @@ fn open_folder(engine: State<Arc<Engine>>) {
     if let Ok(dir) = engine.dir() {
         let _ = std::process::Command::new("explorer").arg(dir).spawn();
     }
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn show_bar(engine: State<Arc<Engine>>) {
+    engine.show_bar();
 }
 
 #[cfg(windows)]
@@ -223,7 +243,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             start_recording, stop_recording, pause_recording, pick_area, area_chosen, set_camera, status, targets, recordings,
-            agent_command, open_folder, reveal, glass_frame
+            agent_command, open_folder, reveal, glass_frame, trim_recording, open_trim, show_bar
         ])
         .run(tauri::generate_context!())
         .expect("error while running kakkoii");

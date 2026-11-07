@@ -5,7 +5,8 @@
     "main",
     "camera",
     "island",
-    "area"
+    "area",
+    "trim"
   ],
   "permissions": [
     "core:default",

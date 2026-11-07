@@ -131,8 +131,9 @@
     });
     $('top').innerHTML = !top ? '' : top.err ? `<div class="err">${esc(top.err)}</div>`
       : top.note ? `<div class="saved"><span class="ok">${icon('check', 12)}</span><div class="what"><div class="name">${esc(top.note)}</div></div></div>`
-      : `<div class="saved"><span class="ok">${icon('check', 12)}</span><div class="what"><div class="name">${esc(top.file.split(/[\\/]/).pop())}</div><div class="meta mono">${top.meta}</div></div><button class="chip" id="show">Show</button><button class="chip" id="copy">Copy path</button></div>`;
+      : `<div class="saved"><span class="ok">${icon('check', 12)}</span><div class="what"><div class="name">${esc(top.file.split(/[\\/]/).pop())}</div><div class="meta mono">${top.meta}</div></div><button class="chip" id="trim">Trim</button><button class="chip" id="show">Show</button><button class="chip" id="copy">Copy path</button></div>`;
     if (top?.file) {
+      $('trim').onclick = () => void invoke('open_trim', { file: top.file }).catch((e) => { top = { err: String(e) }; render(); });
       $('show').onclick = () => void invoke('reveal', { path: top.file });
       $('copy').onclick = async () => { await navigator.clipboard.writeText(top.file); $('copy').textContent = 'Copied'; };
     }
