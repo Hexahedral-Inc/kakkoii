@@ -6,7 +6,8 @@
     "camera",
     "island",
     "area",
-    "trim"
+    "trim",
+    "orb"
   ],
   "permissions": [
     "core:default",

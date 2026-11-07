@@ -139,6 +139,7 @@ fn call(engine: &Arc<Engine>, tool: &str, args: Value) -> Result<Value, String> 
                 secs("end").unwrap_or(f64::MAX),
             )
         }
+        "screenshot" => engine.screenshot(false),
         "open_trim" => engine.open_trim(args.get("file").and_then(Value::as_str).map(String::from)).map(|_| json!({ "opened": true })),
         _ => Err(format!("unknown tool {tool}")),
     }
@@ -210,6 +211,8 @@ fn tools() -> Value {
               "start": { "type": "number", "description": "seconds from the start" },
               "end": { "type": "number", "description": "seconds from the start" }
           } } },
+        { "name": "screenshot", "description": "Take a PNG of the main display (Kakkoii's own windows are left out). Saved in Pictures\\Kakkoii; returns the path.",
+          "inputSchema": { "type": "object", "properties": {} } },
         { "name": "open_trim", "description": "Open the trim window on screen so the user can cut a recording by hand. Defaults to the last recording.",
           "inputSchema": { "type": "object", "properties": { "file": { "type": "string" } } } }
     ])

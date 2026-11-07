@@ -361,6 +361,71 @@ impl Engine {
         Ok(json!({ "dir": dir.to_string_lossy(), "files": files }))
     }
 
+    /// Kakkoii's orb: a small lens that floats over everything, never in a recording.
+    pub fn open_orb(&self) -> Result<(), String> {
+        if let Some(w) = self.app.get_webview_window("orb") {
+            let _ = w.show();
+            return Ok(());
+        }
+        let w = WebviewWindowBuilder::new(&self.app, "orb", WebviewUrl::App("orb.html".into()))
+            .title("Kakkoii")
+            .inner_size(100.0, 100.0)
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .focused(false)
+            .visible(false)
+            .additional_browser_args(BROWSER_ARGS)
+            .build()
+            .map_err(|e| e.to_string())?;
+        crate::hide_from_capture(&w);
+        let w2 = w.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(250)); // let it place itself first
+            let _ = w2.show();
+        });
+        Ok(())
+    }
+
+    /// Alt+Shift+K: bring the orb back and open (or close) its menu.
+    pub fn orb_menu(&self) {
+        let _ = self.open_orb();
+        if let Some(w) = self.app.get_webview_window("orb") {
+            let _ = w.set_focus();
+        }
+        let _ = self.app.emit_to("orb", "kakkoii://orb", ());
+    }
+
+    /// The whole main display as a PNG in Pictures\Kakkoii. Kakkoii's own windows stay out of it.
+    pub fn screenshot(&self, from_ui: bool) -> Result<Value, String> {
+        if from_ui {
+            std::thread::sleep(std::time::Duration::from_millis(260)); // the menu folds away first
+        }
+        let monitors = xcap::Monitor::all().map_err(|e| e.to_string())?;
+        let m = monitors
+            .iter()
+            .find(|m| m.is_primary().unwrap_or(false))
+            .or(monitors.first())
+            .ok_or("no display")?;
+        let img = m.capture_image().map_err(|e| e.to_string())?;
+        let dir = self.app.path().picture_dir().map_err(|e| e.to_string())?.join("Kakkoii");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let path = dir.join(format!("kakkoii-{}.png", now_secs()));
+        img.save(&path).map_err(|e| e.to_string())?;
+        let file = path.to_string_lossy().to_string();
+        let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        let shot = json!({ "file": file, "width": img.width(), "height": img.height(), "bytes": bytes, "kind": "screenshot" });
+        let _ = self.app.emit("kakkoii://shot", &shot);
+        if from_ui {
+            let _ = self.app.emit("kakkoii://saved", &shot);
+            self.show_bar();
+        }
+        Ok(shot)
+    }
+
     /// A lossless copy of `start..end` seconds as <name>-trim.mp4 (then -trim2, ...).
     pub fn trim(&self, file: Option<String>, start: f64, end: f64) -> Result<Value, String> {
         let src = file

@@ -75,7 +75,7 @@
   const ORDER = ['balanced', 'high', 'small'];
   const BROWSERS = /chrome|msedge|firefox|brave|opera|vivaldi|arc/i;
   let quality = localStorage.getItem('quality') || 'balanced';
-  const sound = { system: localStorage.getItem('sound.system') !== 'off', mic: localStorage.getItem('sound.mic') === 'on' };
+  let sound = { system: localStorage.getItem('sound.system') !== 'off', mic: localStorage.getItem('sound.mic') === 'on' };
   const toggleSound = (k) => { sound[k] = !sound[k]; localStorage.setItem('sound.' + k, sound[k] ? 'on' : 'off'); render(); };
   let state = { recording: false, camera: false };
   let windows = [], files = 0, sel = 0, shown = [], top = null;
@@ -131,9 +131,9 @@
     });
     $('top').innerHTML = !top ? '' : top.err ? `<div class="err">${esc(top.err)}</div>`
       : top.note ? `<div class="saved"><span class="ok">${icon('check', 12)}</span><div class="what"><div class="name">${esc(top.note)}</div></div></div>`
-      : `<div class="saved"><span class="ok">${icon('check', 12)}</span><div class="what"><div class="name">${esc(top.file.split(/[\\/]/).pop())}</div><div class="meta mono">${top.meta}</div></div><button class="chip" id="trim">Trim</button><button class="chip" id="show">Show</button><button class="chip" id="copy">Copy path</button></div>`;
+      : `<div class="saved"><span class="ok">${icon('check', 12)}</span><div class="what"><div class="name">${esc(top.file.split(/[\\/]/).pop())}</div><div class="meta mono">${top.meta}</div></div>${/\.mp4$/i.test(top.file) ? '<button class="chip" id="trim">Trim</button>' : ''}<button class="chip" id="show">Show</button><button class="chip" id="copy">Copy path</button></div>`;
     if (top?.file) {
-      $('trim').onclick = () => void invoke('open_trim', { file: top.file }).catch((e) => { top = { err: String(e) }; render(); });
+      if ($('trim')) $('trim').onclick = () => void invoke('open_trim', { file: top.file }).catch((e) => { top = { err: String(e) }; render(); });
       $('show').onclick = () => void invoke('reveal', { path: top.file });
       $('copy').onclick = async () => { await navigator.clipboard.writeText(top.file); $('copy').textContent = 'Copied'; };
     }
@@ -163,8 +163,18 @@
   const fmtLen = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
   const fmtSize = (b) => b > 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${(b / 1e6).toFixed(1)} MB`;
   listen('kakkoii://state', (e) => { state = e.payload; render(); });
-  listen('kakkoii://saved', (e) => { const r = e.payload; top = { file: r.file, meta: `${fmtLen(r.seconds)} · ${fmtSize(r.bytes)}` }; void refresh(); });
-  listen('kakkoii://open', () => { setTimeout(() => $('q').focus(), 30); void refresh(); });
+  listen('kakkoii://saved', (e) => {
+    const r = e.payload;
+    top = { file: r.file, meta: r.kind === 'screenshot' ? `Screenshot · ${r.width}×${r.height} · ${fmtSize(r.bytes)}` : `${fmtLen(r.seconds)} · ${fmtSize(r.bytes)}` };
+    void refresh();
+  });
+  // The orb changes the same settings; pick them up each time the bar opens.
+  listen('kakkoii://open', () => {
+    quality = localStorage.getItem('quality') || 'balanced';
+    sound.system = localStorage.getItem('sound.system') !== 'off';
+    sound.mic = localStorage.getItem('sound.mic') === 'on';
+    setTimeout(() => $('q').focus(), 30); void refresh();
+  });
 
   // Like Sage's bar: it goes when you click away (Alt+Shift+R brings it back).
   let focusedOnce = false;

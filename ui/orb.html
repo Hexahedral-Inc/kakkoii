@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Kakkoii orb</title>
+<link rel="stylesheet" href="theme.css" />
+<style>
+  /* Kakkoii's orb: a black lens with the record dot in it. Click it and the
+     things it can do come out of it as smaller lenses, orbiting slowly. */
+  .orb { position: absolute; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 50%; cursor: pointer; z-index: 2;
+    transition: transform .2s var(--spring); }
+  .orb.slide { transition: left .46s cubic-bezier(.2, 1.15, .3, 1), top .46s cubic-bezier(.2, 1.15, .3, 1), transform .2s var(--spring); }
+  .orb:active { transform: scale(.93); }
+  .lens { position: absolute; inset: 0; border-radius: 50%;
+    background: radial-gradient(circle at 50% 30%, #2a2a2a 0%, #0c0c0c 52%, #000 100%);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.2), inset 0 -8px 16px rgba(255,255,255,.035), 0 10px 24px rgba(0,0,0,.6); }
+  /* A glint that runs round the rim, only while something is happening. */
+  .sheen { position: absolute; inset: 0; border-radius: 50%;
+    background: conic-gradient(from 0deg, transparent 0 62%, rgba(255,255,255,.7) 72%, transparent 82%);
+    -webkit-mask: radial-gradient(circle, transparent calc(50% - 1.6px), #000 calc(50% - 1px));
+    mask: radial-gradient(circle, transparent calc(50% - 1.6px), #000 calc(50% - 1px));
+    opacity: 0; transition: opacity .3s; animation: spin 5s linear infinite paused; }
+  .orb:hover .sheen, .busy .sheen { opacity: 1; animation-play-state: running; }
+  .rec .sheen { background: conic-gradient(from 0deg, transparent 0 55%, rgba(255,59,48,.95) 72%, transparent 86%); opacity: 1; animation-play-state: running; animation-duration: 2.4s; }
+  .held .sheen { background: conic-gradient(from 0deg, transparent 0 55%, rgba(251,191,36,.9) 72%, transparent 86%); animation-play-state: paused; }
+  @keyframes spin { to { transform: rotate(1turn) } }
+  .iris { position: absolute; inset: 21%; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(255,255,255,.07); }
+  .glint { position: absolute; left: 20%; top: 7%; width: 60%; height: 34%; border-radius: 50%; background: linear-gradient(to bottom, rgba(255,255,255,.17), transparent); pointer-events: none; }
+  .dot { position: absolute; left: 50%; top: 50%; width: 30%; height: 30%; transform: translate(-50%, -50%); border-radius: 50%; background: var(--rec);
+    box-shadow: 0 0 0 3px rgba(255,59,48,.16), 0 0 18px rgba(255,59,48,.45); transition: width .3s, height .3s, top .3s, background .2s; }
+  .rec .dot { width: 20%; height: 20%; top: 38%; animation: breathe 1.4s ease-in-out infinite; }
+  .held .dot { background: #fbbf24; box-shadow: 0 0 0 3px rgba(251,191,36,.16); animation: none; }
+  .time { position: absolute; left: 0; right: 0; top: 56%; text-align: center; font-size: 11px; font-weight: 600; color: #fff; opacity: 0; transition: opacity .2s; font-variant-numeric: tabular-nums; }
+  .rec .time { opacity: 1; }
+  .flash .lens { animation: flash .5s ease-out; }
+  @keyframes flash { 0% { box-shadow: inset 0 0 0 1px #fff, 0 0 0 10px rgba(255,255,255,.35) } }
+
+  #ring { position: absolute; inset: 0; pointer-events: none; }
+  .bead { position: absolute; border-radius: 50%; background: #000; }
+  .mini { position: absolute; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; color: #fff; cursor: pointer; display: grid; place-items: center;
+    background: radial-gradient(circle at 50% 28%, #262626 0%, #090909 60%, #000 100%);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.16), 0 6px 16px rgba(0,0,0,.55); transition: box-shadow .15s; }
+  .mini.lit { box-shadow: inset 0 0 0 1px rgba(255,255,255,.75), 0 0 0 4px rgba(255,255,255,.07), 0 6px 16px rgba(0,0,0,.55); }
+  .mini.red { color: var(--rec); }
+  .mini.off { color: var(--muted); }
+  .mini .lbl { position: absolute; top: 51px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 10.5px; font-weight: 600; letter-spacing: .2px;
+    color: rgba(255,255,255,.8); text-shadow: 0 1px 3px #000, 0 0 8px #000, 0 0 2px #000; pointer-events: none; }
+  .mini.lit .lbl { color: #fff; }
+  .mini.danger .lbl { color: #f87171; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <filter id="goo">
+    <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="b" />
+    <feColorMatrix in="b" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10" result="g" />
+    <feBlend in="SourceGraphic" in2="g" />
+  </filter>
+</svg>
+<div id="ring"></div>
+<div class="orb" id="orb" title="Kakkoii · click for the menu · drag to move · Alt+Shift+K">
+  <div class="lens"></div><div class="iris"></div><div class="sheen"></div><div class="glint"></div>
+  <div class="dot"></div><div class="time mono" id="time"></div>
+</div>
+
+<script type="module">
+  import { icon } from './icons.js';
+  const { invoke } = window.__TAURI__.core;
+  const { listen } = window.__TAURI__.event;
+  const { getCurrentWindow, currentMonitor, LogicalPosition, LogicalSize } = window.__TAURI__.window;
+  const win = getCurrentWindow();
+  const $ = (id) => document.getElementById(id);
+
+  const S = 64, W0 = S + 36;          // the orb, and its window when closed (room for its shadow)
+  const D = 46, R = 112, LBL = 26;    // the little lenses, their orbit, their labels
+  const BOX = 2 * (R + D / 2 + LBL);  // the window while the menu is out
+  const OPEN_MS = 520, CLOSE_MS = 380, ORBIT_S = 90;
+
+  // ── settings, shared with the bar through localStorage ──
+  const QUALITY = { balanced: 'Balanced', high: 'High', small: 'Small' }, ORDER = ['balanced', 'high', 'small'];
+  const get = () => ({
+    quality: localStorage.getItem('quality') || 'balanced',
+    system: localStorage.getItem('sound.system') !== 'off',
+    mic: localStorage.getItem('sound.mic') === 'on',
+  });
+  const opts = (extra = {}) => { const g = get(); return { quality: g.quality, sound: { system: g.system, mic: g.mic }, ...extra }; };
+
+  let state = { recording: false, paused: false, camera: false, seconds: 0 };
+  let page = 'main';
+
+  function items() {
+    const g = get();
+    if (page === 'settings') return [
+      { id: 'back', icon: 'back', label: 'Back', keep: true, run: () => go('main') },
+      { id: 'quality', icon: 'quality', label: QUALITY[g.quality], keep: true, run: () => localStorage.setItem('quality', ORDER[(ORDER.indexOf(g.quality) + 1) % 3]) },
+      { id: 'system', icon: g.system ? 'speaker' : 'speakerOff', label: g.system ? 'Sound on' : 'Sound off', off: !g.system, keep: true, run: () => localStorage.setItem('sound.system', g.system ? 'off' : 'on') },
+      { id: 'mic', icon: g.mic ? 'mic' : 'micOff', label: g.mic ? 'Mic on' : 'Mic off', off: !g.mic, keep: true, run: () => localStorage.setItem('sound.mic', g.mic ? 'off' : 'on') },
+      { id: 'agents', icon: 'agents', label: 'Copy MCP', run: async () => navigator.clipboard.writeText(await invoke('agent_command')) },
+      { id: 'hide', icon: 'hide', label: 'Hide orb', run: () => void win.hide() },
+      { id: 'quit', icon: 'power', label: 'Quit', danger: true, run: () => void invoke('quit') },
+    ];
+    if (state.recording) return [
+      { id: 'stop', icon: 'stop', label: 'Stop', red: true, run: () => void invoke('stop_recording') },
+      { id: 'pause', icon: state.paused ? 'play' : 'pause', label: state.paused ? 'Resume' : 'Pause', run: () => void invoke('pause_recording', { on: !state.paused }) },
+      { id: 'bubble', icon: state.camera ? 'camera' : 'cameraOff', label: 'Face bubble', off: !state.camera, keep: true, run: () => void invoke('set_camera', { on: !state.camera }) },
+      { id: 'hide', icon: 'hide', label: 'Hide orb', run: () => void win.hide() },
+    ];
+    return [
+      { id: 'screen', icon: 'record', label: 'Screen', red: true, run: () => void invoke('start_recording', { opts: opts({ target: { kind: 'screen' } }) }) },
+      { id: 'area', icon: 'area', label: 'Area', run: () => void invoke('pick_area', { opts: opts() }) },
+      { id: 'window', icon: 'window', label: 'A window', run: () => void invoke('show_bar') },
+      { id: 'withface', icon: 'face', label: 'With face', run: () => void invoke('start_recording', { opts: opts({ target: { kind: 'screen' }, camera: true, sound: { system: get().system, mic: true } }) }) },
+      { id: 'face', icon: 'camera', label: 'Just face', run: () => void invoke('start_recording', { opts: opts({ target: { kind: 'face' }, sound: { system: get().system, mic: true } }) }) },
+      { id: 'shot', icon: 'shot', label: 'Screenshot', run: () => void invoke('screenshot') },
+      { id: 'bubble', icon: state.camera ? 'camera' : 'cameraOff', label: 'Face bubble', off: !state.camera, keep: true, run: () => void invoke('set_camera', { on: !state.camera }) },
+      { id: 'files', icon: 'folder', label: 'Recordings', run: () => void invoke('open_folder') },
+      { id: 'settings', icon: 'gear', label: 'Settings', keep: true, run: () => go('settings') },
+    ];
+  }
+
+  // ── where things are: the orb's centre in screen px (logical) ──
+  let centre = JSON.parse(localStorage.getItem('orb:centre') || 'null');
+  let rect = null, moving = 0;
+  const work = async () => {
+    const m = await currentMonitor();
+    if (!m) return { x: 0, y: 0, w: 1920, h: 1040 };
+    const s = m.scaleFactor, p = m.position.toLogical(s), z = m.size.toLogical(s);
+    return { x: p.x, y: p.y, w: z.width, h: z.height - 48 };
+  };
+  async function place(r) {
+    rect = r; moving = Date.now();
+    await win.setSize(new LogicalSize(Math.round(r.w), Math.round(r.h)));
+    await win.setPosition(new LogicalPosition(Math.round(r.x), Math.round(r.y)));
+  }
+  const orbAt = (x, y, slide) => { const o = $('orb'); o.classList.toggle('slide', !!slide); o.style.left = `${x}px`; o.style.top = `${y}px`; };
+  const closedRect = () => ({ x: centre.x - W0 / 2, y: centre.y - W0 / 2, w: W0, h: W0 });
+
+  // Your drags: any move we didn't make.
+  let saveT = 0;
+  win.onMoved(async () => {
+    if (Date.now() - moving < 300 || open) return;
+    const s = await win.scaleFactor(), p = (await win.outerPosition()).toLogical(s);
+    centre = { x: p.x + W0 / 2, y: p.y + W0 / 2 };
+    clearTimeout(saveT); saveT = setTimeout(() => localStorage.setItem('orb:centre', JSON.stringify(centre)), 400);
+  });
+
+  // ── the menu: out of the orb like slime, round it like planets, back in ──
+  let open = false, p = 0, spin = 0, hover = null, list = [], raf = 0, anim = null;
+  const ease = { out: (x) => { const c1 = 1.5, c3 = c1 + 1; return 1 + c3 * (x - 1) ** 3 + c1 * (x - 1) ** 2; }, in: (x) => x ** 3 };
+  const clamp = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+
+  function build() {
+    list = items();
+    $('ring').innerHTML = '<div class="bead" id="bead"></div>' + list.map((it, i) =>
+      `<div class="mini${it.red ? ' red' : ''}${it.off ? ' off' : ''}${it.danger ? ' danger' : ''}" data-i="${i}">${icon(it.icon, 18)}<span class="lbl">${it.label}</span></div>`).join('');
+    $('ring').querySelectorAll('.mini').forEach((el) => {
+      el.onpointerenter = () => { hover = +el.dataset.i; el.classList.add('lit'); };
+      el.onpointerleave = () => { if (hover === +el.dataset.i) hover = null; el.classList.remove('lit'); };
+      el.onclick = (e) => { e.stopPropagation(); pick(list[+el.dataset.i]); };
+    });
+  }
+  // Toggles change in place; the rest close the menu first.
+  async function pick(it) {
+    if (it.keep) {
+      await it.run();
+      if (it.id !== 'back' && it.id !== 'settings') { const keepHover = hover; build(); hover = keepHover; frame(performance.now(), true); }
+      return;
+    }
+    await shut(true);
+    it.run();
+  }
+  async function go(next) { await animate(0, CLOSE_MS * 0.7); page = next; build(); await animate(1, OPEN_MS); }
+
+  function frame(now, once) {
+    if (!rect) return;
+    const c = menuC;
+    const n = list.length;
+    const goo = p > 0.02 && p < 0.97;
+    $('ring').style.filter = goo ? 'url(#goo)' : '';
+    const bead = $('bead');
+    if (bead) { const b = S * 0.8 * (goo ? 1 : 0); bead.style.left = `${c.x - b / 2}px`; bead.style.top = `${c.y - b / 2}px`; bead.style.width = bead.style.height = `${b}px`; }
+    $('ring').querySelectorAll('.mini').forEach((el, i) => {
+      const lag = open ? i * 0.045 : 0;
+      const k = clamp((p - lag) / (1 - lag * 0.6));
+      const e = open ? ease.out(k) : 1 - ease.in(1 - k);
+      const a = -Math.PI / 2 + (Math.PI * 2 * i) / n + spin;
+      el.style.left = `${c.x + Math.cos(a) * R * e}px`;
+      el.style.top = `${c.y + Math.sin(a) * R * e}px`;
+      el.style.transform = `scale(${(0.3 + 0.7 * clamp(e)) * (hover === i ? 1.12 : 1)})`;
+      el.style.pointerEvents = p > 0.6 ? 'auto' : 'none';
+      el.querySelector('.lbl').style.opacity = clamp((p - 0.7) / 0.3);
+    });
+  }
+  function loop(now) {
+    raf = 0;
+    if (!open && p === 0) return; // nothing moving: no frames, no CPU
+    const dt = Math.min(0.05, (now - (loop.last || now)) / 1000); loop.last = now;
+    if (hover === null) spin += (dt * Math.PI * 2) / ORBIT_S;
+    if (anim) {
+      const k = clamp((now - anim.t0) / anim.dur);
+      p = anim.from + (anim.to - anim.from) * k;
+      if (k >= 1) { const done = anim.done; anim = null; done(); }
+    }
+    frame(now);
+    raf = requestAnimationFrame(loop);
+  }
+  const kick = () => { if (!raf) { loop.last = 0; raf = requestAnimationFrame(loop); } };
+  const animate = (to, dur) => new Promise((done) => { anim = { from: p, to, dur, t0: performance.now(), done }; kick(); });
+
+  // Where the ring sits in the window (the window is pulled on screen near an edge; the orb slides to the middle).
+  let menuC = { x: BOX / 2, y: BOX / 2 }, off = { x: 0, y: 0 };
+  async function show() {
+    if (open) return;
+    open = true; page = 'main';
+    build();
+    const a = await work();
+    const r = { x: centre.x - BOX / 2, y: centre.y - BOX / 2, w: BOX, h: BOX };
+    r.x = Math.max(a.x, Math.min(a.x + a.w - BOX, r.x));
+    r.y = Math.max(a.y, Math.min(a.y + a.h - BOX, r.y));
+    off = { x: centre.x - r.x, y: centre.y - r.y };
+    orbAt(off.x, off.y, false);
+    await place(r);
+    menuC = { x: BOX / 2, y: BOX / 2 };
+    $('orb').classList.add('busy');
+    requestAnimationFrame(() => orbAt(BOX / 2, BOX / 2, true));
+    void win.setFocus();
+    await animate(1, OPEN_MS);
+  }
+  async function shut(fast) {
+    if (!open) return;
+    open = false;
+    orbAt(off.x, off.y, true);
+    await animate(0, fast ? 200 : CLOSE_MS);
+    $('ring').innerHTML = '';
+    $('orb').classList.remove('busy');
+    await place(closedRect());
+    orbAt(W0 / 2, W0 / 2, false);
+  }
+  const toggle = () => (open ? shut() : show());
+
+  // ── the orb: click opens, drag moves ──
+  let down = null;
+  $('orb').addEventListener('pointerdown', (e) => { down = { x: e.screenX, y: e.screenY, b: e.button }; });
+  $('orb').addEventListener('pointermove', (e) => {
+    if (!down || down.b !== 0 || open) return;
+    if (Math.hypot(e.screenX - down.x, e.screenY - down.y) > 4) { down = null; void win.startDragging(); }
+  });
+  $('orb').addEventListener('pointerup', () => { if (down) void toggle(); down = null; });
+  addEventListener('contextmenu', (e) => { e.preventDefault(); if (!open) void show(); });
+  document.body.addEventListener('click', (e) => { if (open && e.target === document.body) void shut(); });
+  addEventListener('keydown', (e) => { if (e.key === 'Escape') void shut(); });
+  win.onFocusChanged(({ payload }) => { if (!payload && open && !anim) void shut(); });
+
+  // ── recording state on the orb itself ──
+  let tick = 0, started = 0;
+  const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  function paint(s) {
+    const was = state.recording;
+    state = s;
+    $('orb').classList.toggle('rec', !!s.recording);
+    $('orb').classList.toggle('held', !!s.paused);
+    clearInterval(tick);
+    if (s.recording) {
+      started = Date.now() - s.seconds * 1000;
+      const upd = () => { $('time').textContent = fmt(Math.floor((Date.now() - started) / 1000)); };
+      upd(); if (!s.paused) tick = setInterval(upd, 1000);
+    }
+    if (open && was !== !!s.recording) { page = 'main'; build(); }
+    else if (open) { build(); }
+  }
+  listen('kakkoii://state', (e) => paint(e.payload));
+  listen('kakkoii://orb', () => void toggle());
+  listen('kakkoii://shot', () => { $('orb').classList.remove('flash'); void $('orb').offsetWidth; $('orb').classList.add('flash'); });
+
+  // First placement: last time's spot, else bottom right above the taskbar.
+  (async () => {
+    if (!centre) { const a = await work(); centre = { x: a.x + a.w - 120, y: a.y + a.h - 140 }; }
+    await place(closedRect());
+    orbAt(W0 / 2, W0 / 2, false);
+    paint(await invoke('status'));
+  })();
+</script>
+</body>
+</html>

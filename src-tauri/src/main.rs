@@ -110,6 +110,18 @@ fn open_folder(engine: State<Arc<Engine>>) {
 
 #[cfg(windows)]
 #[tauri::command]
+async fn screenshot(engine: State<'_, Arc<Engine>>) -> Result<serde_json::Value, String> {
+    engine.screenshot(true)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn quit(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+#[cfg(windows)]
+#[tauri::command]
 fn show_bar(engine: State<Arc<Engine>>) {
     engine.show_bar();
 }
@@ -188,16 +200,23 @@ fn main() {
     let hotkey = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyR);
     // Alt+Shift+P: pause or carry on.
     let pause_key = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyP);
+    // Alt+Shift+K: the orb and its menu.
+    let orb_key = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyK);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(e) = app.try_state::<Arc<Engine>>() {
-                e.show_bar();
+                e.orb_menu();
             }
         }))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, sc, ev| {
+                    if sc == &orb_key && ev.state() == ShortcutState::Pressed {
+                        if let Some(e) = app.try_state::<Arc<Engine>>() {
+                            e.orb_menu();
+                        }
+                    }
                     if sc == &pause_key && ev.state() == ShortcutState::Pressed {
                         if let Some(e) = app.try_state::<Arc<Engine>>() {
                             let paused = e.status()["paused"].as_bool().unwrap_or(false);
@@ -224,9 +243,10 @@ fn main() {
             let engine = Arc::new(Engine::new(app.handle().clone()));
             app.manage(engine.clone());
             let config = std::env::var("APPDATA").map(std::path::PathBuf::from).unwrap_or_else(|_| std::env::temp_dir()).join("Kakkoii");
-            api::serve(engine, config);
+            api::serve(engine.clone(), config);
             let _ = app.global_shortcut().register(hotkey);
             let _ = app.global_shortcut().register(pause_key);
+            let _ = app.global_shortcut().register(orb_key);
 
             // The bar sits bottom centre, like Sage's.
             let bar = app.get_webview_window("main").unwrap();
@@ -236,14 +256,13 @@ fn main() {
                 let (ax, ay, aw, ah) = (r.position.x as f64 / s, r.position.y as f64 / s, r.size.width as f64 / s, r.size.height as f64 / s);
                 let _ = bar.set_position(tauri::LogicalPosition::new(ax + (aw - 700.0) / 2.0, ay + ah - 132.0 - 26.0));
             }
-            // The bar shows in your screenshots; it hides itself whenever a recording starts.
-            let _ = bar.show();
-            let _ = bar.set_focus();
+            // Kakkoii lives in the orb; the bar comes up for typing a window name and for what was saved.
+            let _ = engine.open_orb();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             start_recording, stop_recording, pause_recording, pick_area, area_chosen, set_camera, status, targets, recordings,
-            agent_command, open_folder, reveal, glass_frame, trim_recording, open_trim, show_bar
+            agent_command, open_folder, reveal, glass_frame, trim_recording, open_trim, show_bar, screenshot, quit
         ])
         .run(tauri::generate_context!())
         .expect("error while running kakkoii");
