@@ -39,6 +39,16 @@
       "icons/128x128.png",
       "icons/icon.png",
       "icons/icon.ico"
-    ]
+    ],
+    "publisher": "Hexahedral, Inc.",
+    "copyright": "MIT, Hexahedral, Inc.",
+    "shortDescription": "A light, open-source screen recorder",
+    "homepage": "https://github.com/Hexahedral-Inc/kakkoii",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
   }
 }
