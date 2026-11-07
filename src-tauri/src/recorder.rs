@@ -43,6 +43,8 @@ pub enum Target {
     Window { query: String },
     /// Whatever window has focus right now.
     Foreground,
+    /// A box on the primary display, in physical pixels from its top-left corner.
+    Area { x: u32, y: u32, w: u32, h: u32 },
     /// Just the user's face: the engine turns this into the camera window's handle.
     Face,
     /// A window by its handle (used for the face-only recording).
@@ -100,6 +102,18 @@ impl Quality {
     }
 }
 
+/// Time spent paused, so the saved length leaves it out.
+#[derive(Default)]
+pub struct PauseClock {
+    total: Duration,
+    since: Option<Instant>,
+}
+impl PauseClock {
+    pub fn paused_for(&self) -> Duration {
+        self.total + self.since.map(|t| t.elapsed()).unwrap_or_default()
+    }
+}
+
 #[derive(Clone)]
 pub struct Flags {
     // Made before capture starts: it takes a couple of seconds to set up, and
@@ -107,8 +121,13 @@ pub struct Flags {
     encoder: Arc<std::sync::Mutex<Option<VideoEncoder>>>,
     quality: Quality,
     stop: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
+    clock: Arc<std::sync::Mutex<PauseClock>>,
     tail: Arc<std::sync::Mutex<Option<Duration>>>,
 }
+
+/// One frame at 60 fps, in 100 ns ticks: the gap left where a pause was cut out.
+const ONE_FRAME: i64 = 166_667;
 
 pub struct Rec {
     flags: Flags,
@@ -119,6 +138,9 @@ pub struct Rec {
     first_at: Option<Instant>,
     frames: u64,
     tail: Arc<std::sync::Mutex<Option<Duration>>>,
+    // The last frame we sent, and where a pause began, in capture ticks.
+    last_ts: i64,
+    pause_from: Option<i64>,
 }
 
 impl GraphicsCaptureApiHandler for Rec {
@@ -127,7 +149,7 @@ impl GraphicsCaptureApiHandler for Rec {
 
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
         let encoder = ctx.flags.encoder.lock().unwrap().take();
-        Ok(Self { tail: ctx.flags.tail.clone(), flags: ctx.flags, encoder, done: false, first_at: Some(Instant::now()), frames: 0 })
+        Ok(Self { tail: ctx.flags.tail.clone(), flags: ctx.flags, encoder, done: false, first_at: Some(Instant::now()), frames: 0, last_ts: 0, pause_from: None })
     }
 
     fn on_frame_arrived(
@@ -138,6 +160,24 @@ impl GraphicsCaptureApiHandler for Rec {
         if self.done {
             return Ok(());
         }
+        if self.flags.stop.load(Ordering::Relaxed) && self.flags.paused.load(Ordering::Relaxed) {
+            // Stopped while paused: save what came before the pause.
+            self.finish_with_tail()?;
+            control.stop();
+            return Ok(());
+        }
+        let ts = frame.timestamp()?.Duration;
+        if self.flags.paused.load(Ordering::Relaxed) {
+            if self.pause_from.is_none() {
+                self.pause_from = Some(self.last_ts);
+            }
+            return Ok(());
+        }
+        if let (Some(from), Some(enc)) = (self.pause_from.take(), self.encoder.as_mut()) {
+            // Cut the pause out of the timeline, leaving one frame's gap.
+            enc.add_time_offset((ts - from - ONE_FRAME).max(0));
+        }
+        self.last_ts = ts;
         if let Some(enc) = self.encoder.as_mut() {
             if let Err(e) = enc.send_frame(frame) {
                 log(format!("send_frame failed after {} frames: {e}", self.frames));
@@ -172,7 +212,8 @@ impl Rec {
         }
         // Measure before the encoder flushes: that takes a second and isn't recording.
         if let Some(at) = self.first_at {
-            *self.tail.lock().unwrap() = Some(at.elapsed());
+            let paused = self.flags.clock.lock().unwrap().paused_for();
+            *self.tail.lock().unwrap() = Some(at.elapsed().saturating_sub(paused));
         }
         if let Some(enc) = self.encoder.take() {
             enc.finish()?;
@@ -185,6 +226,8 @@ impl Rec {
 pub struct Session {
     control: CaptureControl<Rec, BoxError>,
     stop: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
+    clock: Arc<std::sync::Mutex<PauseClock>>,
     tail: Arc<std::sync::Mutex<Option<Duration>>>,
     audio: Option<crate::audio::Audio>,
     pub path: String,
@@ -250,7 +293,9 @@ pub fn start(target: &Target, quality: Quality, sound: Sound, path: String) -> R
     let stop = Arc::new(AtomicBool::new(false));
     let tail = Arc::new(std::sync::Mutex::new(None));
     let slot = Arc::new(std::sync::Mutex::new(None));
-    let flags = Flags { encoder: slot.clone(), quality, stop: stop.clone(), tail: tail.clone() };
+    let paused = Arc::new(AtomicBool::new(false));
+    let clock = Arc::new(std::sync::Mutex::new(PauseClock::default()));
+    let flags = Flags { encoder: slot.clone(), quality, stop: stop.clone(), paused: paused.clone(), clock: clock.clone(), tail: tail.clone() };
     let ready = |w: u32, h: u32| -> Result<(), String> {
         *slot.lock().unwrap() = Some(encoder(w, h, quality, sound.any(), &path)?);
         Ok(())
@@ -273,6 +318,17 @@ pub fn start(target: &Target, quality: Quality, sound: Sound, path: String) -> R
             let label = w.title().unwrap_or_else(|_| query.clone());
             (launch(w, flags)?, label)
         }
+        Target::Area { x, y, w, h } => {
+            let m = Monitor::primary().map_err(|e| e.to_string())?;
+            let (mw, mh) = (m.width().map_err(|e| e.to_string())?, m.height().map_err(|e| e.to_string())?);
+            let (x, y) = ((*x).min(mw.saturating_sub(16)), (*y).min(mh.saturating_sub(16)));
+            let (w, h) = ((*w).clamp(16, mw - x), (*h).clamp(16, mh - y));
+            ready(w, h)?;
+            if let Some(enc) = slot.lock().unwrap().as_mut() {
+                enc.set_crop(x, y);
+            }
+            (launch(m, flags)?, format!("Area {}x{}", w & !1, h & !1))
+        }
         Target::Face => return Err("face recording goes through the engine".into()),
         Target::Hwnd { hwnd } => {
             let w = Window::from_raw_hwnd(*hwnd as *mut std::ffi::c_void);
@@ -291,16 +347,38 @@ pub fn start(target: &Target, quality: Quality, sound: Sound, path: String) -> R
     // Sound goes straight into the encoder the capture thread owns.
     let audio = sound.any().then(|| {
         let rec = control.callback();
-        crate::audio::Audio::start(sound.system, sound.mic, move |pcm| {
+        crate::audio::Audio::start(sound.system, sound.mic, paused.clone(), move |pcm| {
             if let Some(enc) = rec.lock().encoder.as_mut() {
                 let _ = enc.send_audio_buffer(pcm, 0);
             }
         })
     });
-    Ok(Session { control, stop, tail, audio, path, label })
+    Ok(Session { control, stop, paused, clock, tail, audio, path, label })
 }
 
 impl Session {
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
+    }
+
+    /// Pause or carry on. Frames and sound while paused are dropped, and the
+    /// gap is cut out of the video's timeline.
+    pub fn set_paused(&self, on: bool) {
+        let mut c = self.clock.lock().unwrap();
+        if on && c.since.is_none() {
+            c.since = Some(Instant::now());
+        } else if !on {
+            if let Some(t) = c.since.take() {
+                c.total += t.elapsed();
+            }
+        }
+        self.paused.store(on, Ordering::Relaxed);
+    }
+
+    /// Seconds actually recorded, pauses left out.
+    pub fn recorded(&self, started: Instant) -> f64 {
+        started.elapsed().saturating_sub(self.clock.lock().unwrap().paused_for()).as_secs_f64()
+    }
     pub fn is_finished(&self) -> bool {
         self.control.is_finished()
     }

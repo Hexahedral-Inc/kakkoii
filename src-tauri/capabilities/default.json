@@ -4,7 +4,8 @@
   "windows": [
     "main",
     "camera",
-    "island"
+    "island",
+    "area"
   ],
   "permissions": [
     "core:default",

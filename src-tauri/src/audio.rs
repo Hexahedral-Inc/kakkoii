@@ -62,7 +62,7 @@ fn capture(loopback: bool, q: Queue, stop: Arc<AtomicBool>) -> Result<(), String
 
 impl Audio {
     /// Starts capturing and calls `sink` with PCM bytes, paced to the wall clock.
-    pub fn start(system: bool, mic: bool, mut sink: impl FnMut(&[u8]) + Send + 'static) -> Self {
+    pub fn start(system: bool, mic: bool, paused: Arc<AtomicBool>, mut sink: impl FnMut(&[u8]) + Send + 'static) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let mut threads = Vec::new();
         let mut queues = Vec::new();
@@ -81,12 +81,25 @@ impl Audio {
         }
         let st = stop.clone();
         threads.push(std::thread::spawn(move || {
-            let start = Instant::now();
+            // The clock only runs while recording: a pause stops it, and what the
+            // devices capture meanwhile is thrown away.
+            let mut active = Duration::ZERO;
+            let mut last = Instant::now();
             let mut sent: u64 = 0;
             let mut out: Vec<u8> = Vec::new();
             while !st.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(10));
-                let due = (start.elapsed().as_secs_f64() * RATE as f64) as u64;
+                let now = Instant::now();
+                if paused.load(Ordering::Relaxed) {
+                    last = now;
+                    for q in &queues {
+                        q.lock().unwrap().clear();
+                    }
+                    continue;
+                }
+                active += now - last;
+                last = now;
+                let due = (active.as_secs_f64() * RATE as f64) as u64;
                 let frames = due.saturating_sub(sent) as usize;
                 if frames == 0 {
                     continue;

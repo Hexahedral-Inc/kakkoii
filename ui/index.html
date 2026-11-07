@@ -95,6 +95,8 @@
     const base = [
       { id: 'screen', icon: 'screen', text: 'Record the screen', hint: 'enter', run: () => record({ target: { kind: 'screen' } }) },
       { id: 'face', icon: 'face', text: 'Record the screen with my face', hint: 'face', run: () => record({ target: { kind: 'screen' }, camera: true, sound: { ...sound, mic: true } }) },
+      { id: 'area', icon: 'area', text: 'Record an area (drag a box)', hint: 'area',
+        run: () => void invoke('pick_area', { opts: { quality, sound: { ...sound } } }).catch((e) => { top = { err: String(e) }; render(); }) },
       { id: 'faceonly', icon: 'camera', text: 'Record just my face', hint: 'camera', run: () => record({ target: { kind: 'face' }, sound: { ...sound, mic: true } }) },
     ];
     const tail = [

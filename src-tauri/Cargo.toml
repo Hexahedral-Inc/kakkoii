@@ -35,3 +35,7 @@ codegen-units = 1
 opt-level = "s"
 strip = true
 panic = "abort"
+
+# Kakkoii's copy of windows-capture (MIT): adds region crop and pause offsets to the encoder.
+[patch.crates-io]
+windows-capture = { path = "vendor/windows-capture" }

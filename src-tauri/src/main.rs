@@ -39,6 +39,25 @@ async fn stop_recording(engine: State<'_, Arc<Engine>>) -> Result<serde_json::Va
 
 #[cfg(windows)]
 #[tauri::command]
+async fn pause_recording(engine: State<'_, Arc<Engine>>, on: bool) -> Result<serde_json::Value, String> {
+    engine.pause(on)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+async fn pick_area(engine: State<'_, Arc<Engine>>, opts: serde_json::Value) -> Result<(), String> {
+    let opts: StartOpts = serde_json::from_value(opts).map_err(|e| e.to_string())?;
+    engine.open_area(opts)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+async fn area_chosen(engine: State<'_, Arc<Engine>>, rect: Option<(u32, u32, u32, u32)>) -> Result<serde_json::Value, String> {
+    engine.area_chosen(rect)
+}
+
+#[cfg(windows)]
+#[tauri::command]
 async fn set_camera(engine: State<'_, Arc<Engine>>, on: bool) -> Result<serde_json::Value, String> {
     engine.set_camera(on)
 }
@@ -147,6 +166,8 @@ fn main() {
 
     // Alt+Shift+R: open the bar, or stop if we're recording.
     let hotkey = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyR);
+    // Alt+Shift+P: pause or carry on.
+    let pause_key = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyP);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
@@ -157,6 +178,12 @@ fn main() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, sc, ev| {
+                    if sc == &pause_key && ev.state() == ShortcutState::Pressed {
+                        if let Some(e) = app.try_state::<Arc<Engine>>() {
+                            let paused = e.status()["paused"].as_bool().unwrap_or(false);
+                            let _ = e.pause(!paused);
+                        }
+                    }
                     if sc == &hotkey && ev.state() == ShortcutState::Pressed {
                         if let Some(e) = app.try_state::<Arc<Engine>>() {
                             let e = e.inner().clone();
@@ -179,6 +206,7 @@ fn main() {
             let config = std::env::var("APPDATA").map(std::path::PathBuf::from).unwrap_or_else(|_| std::env::temp_dir()).join("Kakkoii");
             api::serve(engine, config);
             let _ = app.global_shortcut().register(hotkey);
+            let _ = app.global_shortcut().register(pause_key);
 
             // The bar sits bottom centre, like Sage's.
             let bar = app.get_webview_window("main").unwrap();
@@ -194,7 +222,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            start_recording, stop_recording, set_camera, status, targets, recordings,
+            start_recording, stop_recording, pause_recording, pick_area, area_chosen, set_camera, status, targets, recordings,
             agent_command, open_folder, reveal, glass_frame
         ])
         .run(tauri::generate_context!())

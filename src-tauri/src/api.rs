@@ -88,6 +88,8 @@ fn handle(mut req: Request, engine: &Arc<Engine>, token: &str) {
         (Method::Get, "/v1/recordings") => engine.recordings(),
         (Method::Post, "/v1/record") => call(engine, "start_recording", body),
         (Method::Post, "/v1/stop") => engine.stop(),
+        (Method::Post, "/v1/pause") => engine.pause(true),
+        (Method::Post, "/v1/resume") => engine.pause(false),
         (Method::Post, "/v1/camera") => call(engine, "camera", body),
         (Method::Post, "/v1/compress") => call(engine, "compress", body),
         _ => return reply(req, 404, json!({ "error": "unknown route", "routes": ROUTES })),
@@ -113,6 +115,8 @@ fn call(engine: &Arc<Engine>, tool: &str, args: Value) -> Result<Value, String> 
             let opts: StartOpts = serde_json::from_value(normalise_target(args)).map_err(|e| e.to_string())?;
             engine.start(opts)
         }
+        "pause_recording" => engine.pause(true),
+        "resume_recording" => engine.pause(false),
         "stop_recording" => {
             crate::recorder::log("stop via agent API");
             engine.stop()
@@ -145,6 +149,9 @@ fn normalise_target(mut args: Value) -> Value {
     if system.is_some() || mic.is_some() {
         args["sound"] = json!({ "system": system.unwrap_or(true), "mic": mic.unwrap_or(false) });
     }
+    if let Some(a) = args.get("area").cloned().filter(Value::is_object) {
+        args["target"] = json!({ "kind": "area", "x": a["x"], "y": a["y"], "w": a["w"], "h": a["h"] });
+    }
     if let Some(i) = args.get("monitor").and_then(Value::as_u64) {
         args["target"] = json!({ "kind": "monitor", "index": i });
     }
@@ -162,6 +169,8 @@ fn tools() -> Value {
           "inputSchema": { "type": "object", "properties": {
               "target": { "type": "string", "description": "screen | face (just the webcam) | foreground | <window title or app name>" },
               "monitor": { "type": "integer", "description": "Record this display instead (1-based)." },
+              "area": { "type": "object", "description": "Record only this box of the primary display, in physical pixels: {x, y, w, h}.",
+                        "properties": { "x": { "type": "integer" }, "y": { "type": "integer" }, "w": { "type": "integer" }, "h": { "type": "integer" } } },
               "quality": { "type": "string", "enum": ["high", "balanced", "small"], "description": "small = 30 fps, light files" },
               "camera": { "type": "boolean", "description": "Show the face bubble on screen while recording." },
               "max_seconds": { "type": "integer", "description": "Stop on its own after this many seconds." },
@@ -169,6 +178,10 @@ fn tools() -> Value {
               "mic": { "type": "boolean", "description": "Record the microphone (default false)." },
               "name": { "type": "string", "description": "File name without extension." }
           } } },
+        { "name": "pause_recording", "description": "Pause the recording. Nothing is recorded until resume_recording; the pause is cut out of the video.",
+          "inputSchema": { "type": "object", "properties": {} } },
+        { "name": "resume_recording", "description": "Carry on after a pause.",
+          "inputSchema": { "type": "object", "properties": {} } },
         { "name": "stop_recording", "description": "Stop and save. Returns the file path, length and size.",
           "inputSchema": { "type": "object", "properties": {} } },
         { "name": "camera", "description": "Show or hide the webcam face bubble.",

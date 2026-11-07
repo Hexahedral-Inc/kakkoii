@@ -17,6 +17,9 @@
   .t { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .lbl { font-size: 12.5px; font-weight: 600; letter-spacing: .2px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
   .gap { flex: 1; min-width: 8px; }
+  /* Paused: the dot stops breathing and goes amber, the time holds. */
+  .held .rec { animation: none; background: #fbbf24; }
+  .held .t { color: var(--text-2); }
   .btn { height: 28px; min-width: 28px; border-radius: 99px; border: 1px solid var(--line); background: transparent; color: var(--text-2);
     display: grid; place-items: center; cursor: pointer; transition: transform .3s var(--spring), color .15s, background .15s; }
   .btn:active { transform: scale(.9); }
@@ -35,6 +38,7 @@
     <span class="t mono" id="t" data-tauri-drag-region>0:00</span>
     <span class="lbl" id="lbl" data-tauri-drag-region></span>
     <span class="gap" data-tauri-drag-region></span>
+    <button class="btn" id="pause" title="Pause (Alt+Shift+P)"></button>
     <button class="btn" id="cam" title="Face bubble"></button>
     <button class="stop" id="stop"><i></i>Stop</button>
   </div>
@@ -44,7 +48,7 @@
   const { invoke } = window.__TAURI__.core;
   const { listen } = window.__TAURI__.event;
   const $ = (id) => document.getElementById(id);
-  let started = Date.now(), tick = 0, camera = false;
+  let started = Date.now(), tick = 0, camera = false, paused = false;
 
   const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   const upd = () => { $('t').textContent = fmt(Math.floor((Date.now() - started) / 1000)); };
@@ -52,17 +56,22 @@
     camera = !!s.camera;
     $('cam').innerHTML = icon(camera ? 'camera' : 'cameraOff', 12);
     $('cam').classList.toggle('on', camera);
+    paused = !!s.paused;
+    $('pause').innerHTML = icon(paused ? 'play' : 'pause', 12);
+    $('pause').classList.toggle('on', paused);
+    $('cap').classList.toggle('held', paused);
     if (s.recording) {
       $('cap').classList.remove('out');
       started = Date.now() - s.seconds * 1000;
-      $('lbl').textContent = s.target === 'Screen' ? 'Recording the screen' : s.target;
-      clearInterval(tick); upd(); tick = setInterval(upd, 1000);
+      $('lbl').textContent = paused ? 'Paused' : s.target === 'Screen' ? 'Recording the screen' : s.target;
+      clearInterval(tick); upd(); if (!paused) tick = setInterval(upd, 1000);
     } else {
       clearInterval(tick);
       $('cap').classList.add('out');
     }
   }
   $('stop').onclick = () => void invoke('stop_recording');
+  $('pause').onclick = () => void invoke('pause_recording', { on: !paused });
   $('cam').onclick = () => void invoke('set_camera', { on: !camera });
   listen('kakkoii://state', (e) => render(e.payload));
   invoke('status').then(render);

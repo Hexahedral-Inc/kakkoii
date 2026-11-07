@@ -47,6 +47,8 @@ struct Inner {
     next_id: u64,
     camera: bool,
     last: Option<String>,
+    // What the bar asked for while the area picker is open.
+    pending: Option<StartOpts>,
 }
 
 pub struct Engine {
@@ -79,7 +81,8 @@ impl Engine {
                 "recording": true,
                 "target": l.session.label,
                 "file": l.session.path,
-                "seconds": l.started.elapsed().as_secs_f64(),
+                "seconds": l.session.recorded(l.started),
+                "paused": l.session.is_paused(),
                 "quality": l.quality,
                 "camera": inner.camera,
             }),
@@ -146,7 +149,7 @@ impl Engine {
 
     pub fn stop(&self) -> Result<Value, String> {
         let live = self.inner.lock().unwrap().live.take().ok_or("not recording")?;
-        let seconds = live.started.elapsed().as_secs_f64();
+        let seconds = live.session.recorded(live.started);
         let path = live.session.stop()?;
         let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         self.inner.lock().unwrap().last = Some(path.clone());
@@ -271,6 +274,67 @@ impl Engine {
             let _ = bar.set_focus();
             let _ = self.app.emit_to("main", "kakkoii://open", ());
         }
+    }
+
+    /// Pause or carry on with the recording in progress.
+    pub fn pause(&self, on: bool) -> Result<Value, String> {
+        {
+            let inner = self.inner.lock().unwrap();
+            let live = inner.live.as_ref().ok_or("not recording")?;
+            live.session.set_paused(on);
+        }
+        self.emit();
+        Ok(self.status())
+    }
+
+    /// Opens the full-screen picker: the user drags a box, then `area_chosen` starts it.
+    pub fn open_area(&self, opts: StartOpts) -> Result<(), String> {
+        if self.recording() {
+            return Err("already recording; stop first".into());
+        }
+        self.inner.lock().unwrap().pending = Some(opts);
+        if let Some(bar) = self.app.get_webview_window("main") {
+            let _ = bar.hide();
+        }
+        let m = self.app.primary_monitor().ok().flatten().ok_or("no display")?;
+        let s = m.scale_factor();
+        let size = m.size().to_logical::<f64>(s);
+        let pos = m.position().to_logical::<f64>(s);
+        if let Some(w) = self.app.get_webview_window("area") {
+            let _ = w.close();
+        }
+        let w = WebviewWindowBuilder::new(&self.app, "area", WebviewUrl::App("area.html".into()))
+            .title("Kakkoii area")
+            .inner_size(size.width, size.height)
+            .position(pos.x, pos.y)
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .focused(true)
+            .additional_browser_args(BROWSER_ARGS)
+            .build()
+            .map_err(|e| e.to_string())?;
+        crate::hide_from_capture(&w);
+        Ok(())
+    }
+
+    /// The picker's answer, in physical pixels from the display's corner. None: cancelled.
+    pub fn area_chosen(self: &std::sync::Arc<Self>, rect: Option<(u32, u32, u32, u32)>) -> Result<Value, String> {
+        if let Some(w) = self.app.get_webview_window("area") {
+            let _ = w.close();
+        }
+        let pending = self.inner.lock().unwrap().pending.take();
+        let Some((x, y, w, h)) = rect else {
+            self.show_bar();
+            return Ok(json!({ "cancelled": true }));
+        };
+        let mut opts = pending.unwrap_or_default();
+        opts.target = Target::Area { x, y, w, h };
+        std::thread::sleep(std::time::Duration::from_millis(120)); // the picker fades before the first frame
+        self.start(opts)
     }
 
     pub fn recording(&self) -> bool {
