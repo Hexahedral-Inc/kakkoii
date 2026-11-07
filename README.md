@@ -1,4 +1,6 @@
-# Kakkoii
+<p align="center"><img src="docs/logo/kakkoii.svg" width="96" alt="Kakkoii" /></p>
+
+<h1 align="center">Kakkoii</h1>
 
 A light, open-source screen recorder. Pick a mode, press record, done. Windows today; macOS and Linux are next.
 
