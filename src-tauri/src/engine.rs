@@ -157,8 +157,9 @@ impl Engine {
         let path = live.session.stop()?;
         let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         self.inner.lock().unwrap().last = Some(path.clone());
-        let by_rec = std::mem::take(&mut self.inner.lock().unwrap().camera_by_rec);
-        if live.face_only || by_rec {
+        // Stopping a recording always puts the camera away.
+        self.inner.lock().unwrap().camera_by_rec = false;
+        {
             if let Some(w) = self.app.get_webview_window("camera") {
                 let _ = w.close();
             }

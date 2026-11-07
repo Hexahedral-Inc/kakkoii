@@ -88,6 +88,40 @@
       const real = cams.find((c) => !IR.test(c.label));
       if (real) await open(real.deviceId).catch(() => {});
     }
+    log(`cameras: ${cams.map((c) => c.label || '?').join(' | ')}`);
+    void watch();
+  }
+
+  // HP and other laptops have a camera key: with it off, the camera still opens but
+  // sends a fixed "camera off" picture. A real sensor always has some noise, so a
+  // dark picture that doesn't change at all is that picture. Say so, and keep
+  // looking, so it comes back by itself when the key is pressed.
+  const log = (msg) => void window.__TAURI__?.core.invoke('ui_log', { msg }).catch(() => {});
+  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 36;
+  const cx = cv.getContext('2d', { willReadFrequently: true });
+  const grab = () => { cx.drawImage($('v'), 0, 0, 64, 36); return cx.getImageData(0, 0, 64, 36).data; };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let dead = false;
+  async function watch() {
+    for (;;) {
+      await wait(dead ? 1500 : 1200);
+      const v = $('v');
+      if (!stream || v.readyState < 2) continue;
+      const a = grab(); await wait(600); const c = grab();
+      let mean = 0, diff = 0;
+      for (let i = 0; i < a.length; i += 4) { mean += (c[i] + c[i + 1] + c[i + 2]) / 3; diff += Math.abs(a[i] - c[i]) + Math.abs(a[i + 1] - c[i + 1]); }
+      mean /= a.length / 4; diff /= a.length / 2;
+      const off = mean < 80 && diff < 0.4;
+      if (off !== dead) {
+        dead = off;
+        const t = stream.getVideoTracks()[0], st = t?.getSettings() || {};
+        log(`${t?.label}: ${st.width}x${st.height} mean=${mean.toFixed(1)} diff=${diff.toFixed(2)} ${off ? 'CAMERA OFF PICTURE' : 'live'}`);
+        if (off) {
+          say('Your camera is switched off<br><br>Press the camera key on your keyboard<br>(the one with a crossed-out camera)');
+          v.hidden = false; v.style.opacity = '0';
+        } else { b.querySelector('.msg')?.remove(); v.style.opacity = '1'; }
+      }
+    }
   }
   addEventListener('contextmenu', async (e) => {
     e.preventDefault();

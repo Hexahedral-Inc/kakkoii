@@ -152,6 +152,13 @@ async fn shot_copy(app: tauri::AppHandle) -> Result<(), String> {
     shot::shot_copy(&app)
 }
 
+/// A page writing to the debug log (the camera says which camera it got).
+#[cfg(windows)]
+#[tauri::command]
+fn ui_log(msg: String) {
+    recorder::log(&format!("ui: {msg}"));
+}
+
 #[cfg(windows)]
 #[tauri::command]
 fn quit(app: tauri::AppHandle) {
@@ -309,7 +316,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            start_recording, stop_recording, pause_recording, pick_area, area_chosen, set_camera, status, targets, recordings,
+            start_recording, stop_recording, pause_recording, ui_log, pick_area, area_chosen, set_camera, status, targets, recordings,
             agent_command, open_folder, reveal, glass_frame, trim_recording, open_trim, show_bar, quit, capture, veil_image, veil_info, veil_done, veil_cancel, shot_info, shot_copy
         ])
         .run(tauri::generate_context!())
