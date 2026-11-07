@@ -36,7 +36,6 @@ struct Live {
     id: u64,
     started: Instant,
     quality: Quality,
-    face_only: bool,
 }
 
 const ISLAND_W: f64 = 440.0;
@@ -132,7 +131,7 @@ impl Engine {
             }
             inner.next_id += 1;
             let id = inner.next_id;
-            inner.live = Some(Live { session, id, started: Instant::now(), quality: opts.quality, face_only });
+            inner.live = Some(Live { session, id, started: Instant::now(), quality: opts.quality });
             (id, Self::status_of(&inner))
         };
         self.island(true);
@@ -160,9 +159,7 @@ impl Engine {
         // Stopping a recording always puts the camera away.
         self.inner.lock().unwrap().camera_by_rec = false;
         {
-            if let Some(w) = self.app.get_webview_window("camera") {
-                let _ = w.close();
-            }
+            self.close_camera();
             self.inner.lock().unwrap().camera = false;
         }
         let saved = json!({ "file": path, "seconds": seconds, "bytes": bytes });
@@ -179,8 +176,8 @@ impl Engine {
             if !full {
                 return Ok(w);
             }
-            let _ = w.close();
-            std::thread::sleep(std::time::Duration::from_millis(150));
+            drop(w);
+            self.close_camera();
         }
         let area = self.app.primary_monitor().ok().flatten().map(|m| {
             let s = m.scale_factor();
@@ -207,11 +204,22 @@ impl Engine {
             .map_err(|e| e.to_string())
     }
 
+    /// WebView2 keeps the camera open (light on) until the app quits if the window
+    /// goes while its stream is live, so the page lets go of the camera first.
+    fn close_camera(&self) {
+        if let Some(w) = self.app.get_webview_window("camera") {
+            let _ = w.eval("window.stopCamera && window.stopCamera()");
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let _ = w.close();
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+    }
+
     pub fn set_camera(&self, on: bool) -> Result<Value, String> {
         if on {
             self.camera_window(false)?;
-        } else if let Some(w) = self.app.get_webview_window("camera") {
-            let _ = w.close();
+        } else {
+            self.close_camera();
         }
         let mut inner = self.inner.lock().unwrap();
         inner.camera = on;

@@ -130,6 +130,9 @@
     const next = cams[(cams.findIndex((c) => c.deviceId === cur) + 1) % cams.length];
     await open(next.deviceId).catch((err) => tag(`${next.label}: ${err.name}`));
   });
+  // Let go of the camera before the window goes, or the light stays on.
+  window.stopCamera = () => { stream?.getTracks().forEach((t) => t.stop()); stream = null; $('v').srcObject = null; };
+  addEventListener('pagehide', window.stopCamera);
   void start();
 </script>
 </body>
