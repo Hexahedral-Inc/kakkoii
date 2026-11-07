@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Kakkoii island</title>
+<link rel="stylesheet" href="theme.css" />
+<style>
+  .wrap { width: 100%; height: 100%; display: flex; justify-content: center; padding-top: 8px; }
+  /* Sage's island: true black capsule, a hairline round it, springing open from the top. */
+  .cap { height: 44px; border-radius: 22px; background: #000; border: 1px solid var(--line); display: flex; align-items: center; gap: 10px;
+    padding: 0 7px 0 16px; transform-origin: 50% 0; cursor: grab; max-width: 100%;
+    animation: open .62s cubic-bezier(.2, 1.3, .35, 1) both; }
+  .cap.out { animation: shut .32s cubic-bezier(.4, 0, .6, 1) both; }
+  @keyframes open { from { opacity: 0; transform: translateY(-14px) scale(.3, .5) } }
+  @keyframes shut { to { opacity: 0; transform: translateY(-16px) scale(.25, .4) } }
+  .rec { width: 10px; height: 10px; border-radius: 50%; background: var(--rec); flex: none; animation: breathe 1.4s ease-in-out infinite; }
+  .t { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .lbl { font-size: 12.5px; font-weight: 600; letter-spacing: .2px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
+  .gap { flex: 1; min-width: 8px; }
+  .btn { height: 28px; min-width: 28px; border-radius: 99px; border: 1px solid var(--line); background: transparent; color: var(--text-2);
+    display: grid; place-items: center; cursor: pointer; transition: transform .3s var(--spring), color .15s, background .15s; }
+  .btn:active { transform: scale(.9); }
+  .btn.on { color: #fff; border-color: var(--line-strong); }
+  .stop { height: 28px; padding: 0 12px 0 10px; border-radius: 99px; border: 1px solid var(--line-strong); background: transparent; color: #fff;
+    font-size: 11.5px; font-weight: 650; display: flex; align-items: center; gap: 6px; cursor: pointer; transition: background .15s, transform .3s var(--spring); }
+  .stop:hover { background: rgba(255,255,255,.08); }
+  .stop:active { transform: scale(.94); }
+  .stop i { width: 9px; height: 9px; border-radius: 2px; background: var(--rec); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="cap" id="cap" data-tauri-drag-region>
+    <span class="rec" data-tauri-drag-region></span>
+    <span class="t mono" id="t" data-tauri-drag-region>0:00</span>
+    <span class="lbl" id="lbl" data-tauri-drag-region></span>
+    <span class="gap" data-tauri-drag-region></span>
+    <button class="btn" id="cam" title="Face bubble"></button>
+    <button class="stop" id="stop"><i></i>Stop</button>
+  </div>
+</div>
+<script type="module">
+  import { icon } from './icons.js';
+  const { invoke } = window.__TAURI__.core;
+  const { listen } = window.__TAURI__.event;
+  const $ = (id) => document.getElementById(id);
+  let started = Date.now(), tick = 0, camera = false;
+
+  const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const upd = () => { $('t').textContent = fmt(Math.floor((Date.now() - started) / 1000)); };
+  function render(s) {
+    camera = !!s.camera;
+    $('cam').innerHTML = icon(camera ? 'camera' : 'cameraOff', 12);
+    $('cam').classList.toggle('on', camera);
+    if (s.recording) {
+      $('cap').classList.remove('out');
+      started = Date.now() - s.seconds * 1000;
+      $('lbl').textContent = s.target === 'Screen' ? 'Recording the screen' : s.target;
+      clearInterval(tick); upd(); tick = setInterval(upd, 1000);
+    } else {
+      clearInterval(tick);
+      $('cap').classList.add('out');
+    }
+  }
+  $('stop').onclick = () => void invoke('stop_recording');
+  $('cam').onclick = () => void invoke('set_camera', { on: !camera });
+  listen('kakkoii://state', (e) => render(e.payload));
+  invoke('status').then(render);
+</script>
+</body>
+</html>
