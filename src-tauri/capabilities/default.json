@@ -7,7 +7,9 @@
     "island",
     "area",
     "trim",
-    "orb"
+    "orb",
+    "veil",
+    "shot"
   ],
   "permissions": [
     "core:default",

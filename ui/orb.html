@@ -5,35 +5,21 @@
 <title>Kakkoii orb</title>
 <link rel="stylesheet" href="theme.css" />
 <style>
-  /* Kakkoii's orb: a black lens with the record dot in it. Click it and the
-     things it can do come out of it as smaller lenses, orbiting slowly. */
+  /* Kakkoii's orb: a small black hole (blackhole.js). Click it and the things it
+     can do come out of it as little black lenses, orbiting it slowly. */
   .orb { position: absolute; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 50%; cursor: pointer; z-index: 2;
     transition: transform .2s var(--spring); }
   .orb.slide { transition: left .46s cubic-bezier(.2, 1.15, .3, 1), top .46s cubic-bezier(.2, 1.15, .3, 1), transform .2s var(--spring); }
+  .orb:hover { transform: scale(1.06); }
   .orb:active { transform: scale(.93); }
-  .lens { position: absolute; inset: 0; border-radius: 50%;
-    background: radial-gradient(circle at 50% 30%, #2a2a2a 0%, #0c0c0c 52%, #000 100%);
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,.2), inset 0 -8px 16px rgba(255,255,255,.035), 0 10px 24px rgba(0,0,0,.6); }
-  /* A glint that runs round the rim, only while something is happening. */
-  .sheen { position: absolute; inset: 0; border-radius: 50%;
-    background: conic-gradient(from 0deg, transparent 0 62%, rgba(255,255,255,.7) 72%, transparent 82%);
-    -webkit-mask: radial-gradient(circle, transparent calc(50% - 1.6px), #000 calc(50% - 1px));
-    mask: radial-gradient(circle, transparent calc(50% - 1.6px), #000 calc(50% - 1px));
-    opacity: 0; transition: opacity .3s; animation: spin 5s linear infinite paused; }
-  .orb:hover .sheen, .busy .sheen { opacity: 1; animation-play-state: running; }
-  .rec .sheen { background: conic-gradient(from 0deg, transparent 0 55%, rgba(255,59,48,.95) 72%, transparent 86%); opacity: 1; animation-play-state: running; animation-duration: 2.4s; }
-  .held .sheen { background: conic-gradient(from 0deg, transparent 0 55%, rgba(251,191,36,.9) 72%, transparent 86%); animation-play-state: paused; }
-  @keyframes spin { to { transform: rotate(1turn) } }
-  .iris { position: absolute; inset: 21%; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(255,255,255,.07); }
-  .glint { position: absolute; left: 20%; top: 7%; width: 60%; height: 34%; border-radius: 50%; background: linear-gradient(to bottom, rgba(255,255,255,.17), transparent); pointer-events: none; }
-  .dot { position: absolute; left: 50%; top: 50%; width: 30%; height: 30%; transform: translate(-50%, -50%); border-radius: 50%; background: var(--rec);
-    box-shadow: 0 0 0 3px rgba(255,59,48,.16), 0 0 18px rgba(255,59,48,.45); transition: width .3s, height .3s, top .3s, background .2s; }
-  .rec .dot { width: 20%; height: 20%; top: 38%; animation: breathe 1.4s ease-in-out infinite; }
-  .held .dot { background: #fbbf24; box-shadow: 0 0 0 3px rgba(251,191,36,.16); animation: none; }
-  .time { position: absolute; left: 0; right: 0; top: 56%; text-align: center; font-size: 11px; font-weight: 600; color: #fff; opacity: 0; transition: opacity .2s; font-variant-numeric: tabular-nums; }
+  #bh { position: absolute; left: -24px; top: -24px; width: 112px; height: 112px; pointer-events: none; }
+  /* No WebGL: a plain horizon with a white ring. */
+  #bh.flat { left: 10px; top: 10px; width: 44px; height: 44px; border-radius: 50%; background: #000; box-shadow: 0 0 0 1.5px rgba(255,255,255,.85), 0 0 14px rgba(255,255,255,.35); }
+  .time { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); text-align: center; font-size: 10.5px; font-weight: 600; color: #fff;
+    opacity: 0; transition: opacity .3s; font-variant-numeric: tabular-nums; pointer-events: none; }
   .rec .time { opacity: 1; }
-  .flash .lens { animation: flash .5s ease-out; }
-  @keyframes flash { 0% { box-shadow: inset 0 0 0 1px #fff, 0 0 0 10px rgba(255,255,255,.35) } }
+  .flash #bh { animation: flash .6s ease-out; }
+  @keyframes flash { 0% { filter: brightness(2.6) } }
 
   #ring { position: absolute; inset: 0; pointer-events: none; }
   .bead { position: absolute; border-radius: 50%; background: #000; }
@@ -59,19 +45,23 @@
 </svg>
 <div id="ring"></div>
 <div class="orb" id="orb" title="Kakkoii · click for the menu · drag to move · Alt+Shift+K">
-  <div class="lens"></div><div class="iris"></div><div class="sheen"></div><div class="glint"></div>
-  <div class="dot"></div><div class="time mono" id="time"></div>
+  <canvas id="bh"></canvas><div class="time mono" id="time"></div>
+</div>
 </div>
 
 <script type="module">
   import { icon } from './icons.js';
+  import { blackHole } from './blackhole.js';
   const { invoke } = window.__TAURI__.core;
   const { listen } = window.__TAURI__.event;
   const { getCurrentWindow, currentMonitor, LogicalPosition, LogicalSize } = window.__TAURI__.window;
   const win = getCurrentWindow();
   const $ = (id) => document.getElementById(id);
+  const bh = blackHole($('bh'));
+  $('orb').addEventListener('pointerenter', () => bh.set({ active: true }));
+  $('orb').addEventListener('pointerleave', () => { if (!open) bh.set({ active: false }); });
 
-  const S = 64, W0 = S + 36;          // the orb, and its window when closed (room for its shadow)
+  const S = 64, W0 = S + 48;          // the orb, and its window when closed (room for the disk)
   const D = 46, R = 112, LBL = 26;    // the little lenses, their orbit, their labels
   const BOX = 2 * (R + D / 2 + LBL);  // the window while the menu is out
   const OPEN_MS = 520, CLOSE_MS = 380, ORBIT_S = 90;
@@ -111,7 +101,7 @@
       { id: 'window', icon: 'window', label: 'A window', run: () => void invoke('show_bar') },
       { id: 'withface', icon: 'face', label: 'With face', run: () => void invoke('start_recording', { opts: opts({ target: { kind: 'screen' }, camera: true, sound: { system: get().system, mic: true } }) }) },
       { id: 'face', icon: 'camera', label: 'Just face', run: () => void invoke('start_recording', { opts: opts({ target: { kind: 'face' }, sound: { system: get().system, mic: true } }) }) },
-      { id: 'shot', icon: 'shot', label: 'Screenshot', run: () => void invoke('screenshot') },
+      { id: 'shot', icon: 'shot', label: 'Screenshot', run: () => void invoke('capture', { mode: 'region' }) },
       { id: 'bubble', icon: state.camera ? 'camera' : 'cameraOff', label: 'Face bubble', off: !state.camera, keep: true, run: () => void invoke('set_camera', { on: !state.camera }) },
       { id: 'files', icon: 'folder', label: 'Recordings', run: () => void invoke('open_folder') },
       { id: 'settings', icon: 'gear', label: 'Settings', keep: true, run: () => go('settings') },
@@ -221,7 +211,7 @@
     orbAt(off.x, off.y, false);
     await place(r);
     menuC = { x: BOX / 2, y: BOX / 2 };
-    $('orb').classList.add('busy');
+    $('orb').classList.add('busy'); bh.set({ active: true });
     requestAnimationFrame(() => orbAt(BOX / 2, BOX / 2, true));
     void win.setFocus();
     await animate(1, OPEN_MS);
@@ -232,7 +222,7 @@
     orbAt(off.x, off.y, true);
     await animate(0, fast ? 200 : CLOSE_MS);
     $('ring').innerHTML = '';
-    $('orb').classList.remove('busy');
+    $('orb').classList.remove('busy'); bh.set({ active: false });
     await place(closedRect());
     orbAt(W0 / 2, W0 / 2, false);
   }
@@ -259,6 +249,7 @@
     state = s;
     $('orb').classList.toggle('rec', !!s.recording);
     $('orb').classList.toggle('held', !!s.paused);
+    bh.set({ recording: !!s.recording, paused: !!s.paused });
     clearInterval(tick);
     if (s.recording) {
       started = Date.now() - s.seconds * 1000;

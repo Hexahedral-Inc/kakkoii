@@ -399,31 +399,9 @@ impl Engine {
         let _ = self.app.emit_to("orb", "kakkoii://orb", ());
     }
 
-    /// The whole main display as a PNG in Pictures\Kakkoii. Kakkoii's own windows stay out of it.
-    pub fn screenshot(&self, from_ui: bool) -> Result<Value, String> {
-        if from_ui {
-            std::thread::sleep(std::time::Duration::from_millis(260)); // the menu folds away first
-        }
-        let monitors = xcap::Monitor::all().map_err(|e| e.to_string())?;
-        let m = monitors
-            .iter()
-            .find(|m| m.is_primary().unwrap_or(false))
-            .or(monitors.first())
-            .ok_or("no display")?;
-        let img = m.capture_image().map_err(|e| e.to_string())?;
-        let dir = self.app.path().picture_dir().map_err(|e| e.to_string())?.join("Kakkoii");
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let path = dir.join(format!("kakkoii-{}.png", now_secs()));
-        img.save(&path).map_err(|e| e.to_string())?;
-        let file = path.to_string_lossy().to_string();
-        let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        let shot = json!({ "file": file, "width": img.width(), "height": img.height(), "bytes": bytes, "kind": "screenshot" });
-        let _ = self.app.emit("kakkoii://shot", &shot);
-        if from_ui {
-            let _ = self.app.emit("kakkoii://saved", &shot);
-            self.show_bar();
-        }
-        Ok(shot)
+    /// An agent's screenshot: saved at once, with the sweep shown so you see it look.
+    pub fn screenshot(&self) -> Result<Value, String> {
+        crate::shot::look(&self.app)
     }
 
     /// A lossless copy of `start..end` seconds as <name>-trim.mp4 (then -trim2, ...).

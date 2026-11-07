@@ -11,6 +11,8 @@ mod mp4tail;
 #[cfg(windows)]
 mod recorder;
 #[cfg(windows)]
+mod shot;
+#[cfg(windows)]
 mod trim;
 
 #[cfg(windows)]
@@ -110,8 +112,44 @@ fn open_folder(engine: State<Arc<Engine>>) {
 
 #[cfg(windows)]
 #[tauri::command]
-async fn screenshot(engine: State<'_, Arc<Engine>>) -> Result<serde_json::Value, String> {
-    engine.screenshot(true)
+async fn capture(app: tauri::AppHandle, mode: String) -> Result<(), String> {
+    shot::capture(&app, &mode)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+async fn veil_image(app: tauri::AppHandle) -> Result<tauri::ipc::Response, String> {
+    Ok(tauri::ipc::Response::new(shot::veil_image(&app)?))
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn veil_info(app: tauri::AppHandle) -> serde_json::Value {
+    shot::veil_info(&app)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+async fn veil_done(app: tauri::AppHandle, rect: Option<[f64; 4]>) -> Result<serde_json::Value, String> {
+    shot::veil_done(&app, rect)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn veil_cancel(app: tauri::AppHandle) {
+    shot::veil_cancel(&app);
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn shot_info(app: tauri::AppHandle) -> serde_json::Value {
+    shot::shot_info(&app)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+async fn shot_copy(app: tauri::AppHandle) -> Result<(), String> {
+    shot::shot_copy(&app)
 }
 
 #[cfg(windows)]
@@ -202,6 +240,8 @@ fn main() {
     let pause_key = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyP);
     // Alt+Shift+K: the orb and its menu.
     let orb_key = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyK);
+    // Alt+Shift+S: a screenshot (drag a box, click a window, or Enter for all of it).
+    let shot_key = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyS);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
@@ -212,6 +252,12 @@ fn main() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, sc, ev| {
+                    if sc == &shot_key && ev.state() == ShortcutState::Pressed {
+                        let app = app.clone();
+                        std::thread::spawn(move || {
+                            let _ = shot::capture(&app, "region");
+                        });
+                    }
                     if sc == &orb_key && ev.state() == ShortcutState::Pressed {
                         if let Some(e) = app.try_state::<Arc<Engine>>() {
                             e.orb_menu();
@@ -242,11 +288,13 @@ fn main() {
         .setup(move |app| {
             let engine = Arc::new(Engine::new(app.handle().clone()));
             app.manage(engine.clone());
+            app.manage(shot::Shots::default());
             let config = std::env::var("APPDATA").map(std::path::PathBuf::from).unwrap_or_else(|_| std::env::temp_dir()).join("Kakkoii");
             api::serve(engine.clone(), config);
             let _ = app.global_shortcut().register(hotkey);
             let _ = app.global_shortcut().register(pause_key);
             let _ = app.global_shortcut().register(orb_key);
+            let _ = app.global_shortcut().register(shot_key);
 
             // The bar sits bottom centre, like Sage's.
             let bar = app.get_webview_window("main").unwrap();
@@ -262,7 +310,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             start_recording, stop_recording, pause_recording, pick_area, area_chosen, set_camera, status, targets, recordings,
-            agent_command, open_folder, reveal, glass_frame, trim_recording, open_trim, show_bar, screenshot, quit
+            agent_command, open_folder, reveal, glass_frame, trim_recording, open_trim, show_bar, quit, capture, veil_image, veil_info, veil_done, veil_cancel, shot_info, shot_copy
         ])
         .run(tauri::generate_context!())
         .expect("error while running kakkoii");

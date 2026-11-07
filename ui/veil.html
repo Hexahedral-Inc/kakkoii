@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Kakkoii capture</title>
+<link rel="stylesheet" href="theme.css" />
+<style>
+  /* Sage's capture veil: the screen, frozen, under a dither field (a 4x4 Bayer
+     grid lit by two slow waves and a diagonal band of light, brighter where the
+     screen is bright). The screen lands blurred and sharpens as the field clears. */
+  html, body { background: #000; }
+  .wrap { position: fixed; inset: 0; overflow: hidden; }
+  #img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; filter: blur(14px) brightness(.55); transform: scale(1.02);
+    transition: filter .75s cubic-bezier(.2,.8,.2,1), transform .75s cubic-bezier(.2,.8,.2,1); }
+  .swept #img { filter: none; transform: none; }
+  canvas, svg.dim { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .pulse { position: absolute; inset: 0; border: 2px solid #fff; animation: pulse .32s ease-out both; pointer-events: none; }
+  @keyframes pulse { from { opacity: 1 } to { opacity: 0 } }
+  .size { position: absolute; font-size: 11px; color: #fff; background: #000; border: 1px solid var(--line-strong); border-radius: 7px; padding: 3px 8px;
+    pointer-events: none; max-width: 420px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tools { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 5px;
+    background: rgba(0,0,0,.82); border: 1px solid var(--line-strong); border-radius: 999px; box-shadow: 0 10px 40px rgba(0,0,0,.5);
+    animation: drop .3s cubic-bezier(.2,1.2,.4,1) both; }
+  @keyframes drop { from { opacity: 0; transform: translate(-50%, -10px) } }
+  .pill { height: 34px; display: inline-flex; align-items: center; gap: 7px; padding: 0 14px; border-radius: 999px; border: none; background: transparent; color: #fff;
+    font-size: 13px; font-weight: 560; cursor: pointer; }
+  .pill.on { background: #fff; color: #000; }
+  .pill .k { font-size: 10.5px; opacity: .5; }
+  .sep { width: 1px; height: 20px; background: var(--line-strong); margin: 0 4px; }
+</style>
+</head>
+<body>
+<div class="wrap" id="wrap">
+  <img id="img" alt="" />
+  <canvas id="field"></canvas>
+  <svg class="dim" id="dim"></svg>
+  <div id="ui"></div>
+</div>
+<script type="module">
+  import { icon } from './icons.js';
+  const { invoke } = window.__TAURI__.core;
+  const $ = (id) => document.getElementById(id);
+  const win = window.__TAURI__.window.getCurrentWindow();
+  const CELL = 6;
+  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16);
+
+  let mode = '', wins = [], swept = false, tool = 'region', box = null, hot = null, start = null;
+  const cancel = () => void invoke('veil_cancel');
+  const done = (r) => void invoke('veil_done', { rect: r });
+  // Never stranded: whatever happens, the veil is gone after a minute.
+  setTimeout(cancel, 60_000);
+
+  const info = await invoke('veil_info');
+  mode = info.mode; wins = info.windows || [];
+  if (mode !== 'look') { void win.setFocus(); addEventListener('pointerdown', () => void win.setFocus(), { once: true }); }
+  const buf = await invoke('veil_image').catch(() => null);
+  if (!buf) cancel();
+  const src = URL.createObjectURL(new Blob([buf], { type: 'image/jpeg' }));
+  const img = $('img');
+  img.src = src;
+  await img.decode().catch(() => {});
+
+  // The field.
+  const c = $('field'), W = innerWidth, H = innerHeight, dpr = devicePixelRatio || 1;
+  c.width = W * dpr; c.height = H * dpr;
+  const ctx = c.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const cols = Math.ceil(W / CELL), rows = Math.ceil(H / CELL);
+  const probe = document.createElement('canvas');
+  probe.width = cols; probe.height = rows;
+  const pctx = probe.getContext('2d', { willReadFrequently: true });
+  pctx.drawImage(img, 0, 0, cols, rows);
+  const px = pctx.getImageData(0, 0, cols, rows).data;
+  const lum = new Float32Array(cols * rows);
+  for (let i = 0; i < cols * rows; i++) lum[i] = (0.2126 * px[i * 4] + 0.7152 * px[i * 4 + 1] + 0.0722 * px[i * 4 + 2]) / 255;
+  const t0 = performance.now(), dur = mode === 'region' ? 1050 : 1400;
+  const frame = (now) => {
+    const sec = (now - t0) / 1000, k = Math.min(1, (now - t0) / dur);
+    // In fast, holds, and clears over the last third.
+    const life = Math.min(1, k / 0.12) * (k > 0.66 ? 1 - (k - 0.66) / 0.34 : 1);
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#fff';
+    for (let y = 0; y < rows; y++) {
+      const v = y / rows;
+      for (let x = 0; x < cols; x++) {
+        const u = x / cols;
+        const wave = 0.5 + 0.25 * Math.sin(u * 7 + sec * 2.86) * Math.cos(v * 5 - sec * 1.98);
+        const d = (u + v * 0.6 - ((sec * 0.91) % 2.2) + 0.4) * 3.2;
+        const sweep = Math.exp(-d * d);
+        const level = Math.min(1, (wave * 0.45 + sweep * 0.55) * (0.55 + 0.7 * lum[y * cols + x]));
+        if (level <= BAYER[(y & 3) * 4 + (x & 3)]) continue;
+        ctx.globalAlpha = (0.12 + 0.45 * level) * life;
+        ctx.fillRect(x * CELL, y * CELL, CELL - 1, CELL - 1);
+      }
+    }
+    ctx.globalAlpha = 1;
+    if (k < 1) requestAnimationFrame(frame);
+    else { ctx.clearRect(0, 0, W, H); onSwept(); }
+  };
+  requestAnimationFrame(frame);
+
+  function onSwept() {
+    swept = true;
+    $('wrap').classList.add('swept');
+    if (mode === 'full') { $('ui').innerHTML = '<div class="pulse"></div>'; setTimeout(() => done(null), 320); }
+    else if (mode === 'look') setTimeout(cancel, 200);
+    else { $('wrap').style.cursor = 'crosshair'; paint(); }
+  }
+
+  // ── region: drag a box, click a window, or take it all ──
+  const under = (x, y) => wins.find((w) => x >= w.x && x <= w.x + w.w && y >= w.y && y <= w.y + w.h) || null;
+  const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+  function paint() {
+    const pick = tool === 'window' ? hot : box;
+    const rx = tool === 'window' ? 8 : 0;
+    $('dim').innerHTML = `<defs><mask id="hole"><rect width="100%" height="100%" fill="#fff" />${pick ? `<rect x="${pick.x}" y="${pick.y}" width="${pick.w}" height="${pick.h}" rx="${rx}" fill="#000" />` : ''}</mask></defs>
+      <rect width="100%" height="100%" fill="rgba(0,0,0,.5)" mask="url(#hole)" />
+      ${pick ? `<rect x="${pick.x + 0.5}" y="${pick.y + 0.5}" width="${pick.w}" height="${pick.h}" rx="${rx}" fill="none" stroke="#fff" stroke-width="${tool === 'window' ? 2 : 1}" />` : ''}`;
+    const label = pick && pick.w > 0 ? `<div class="size mono" id="size">${esc(tool === 'window' && hot ? hot.title : `${Math.round(pick.w)} × ${Math.round(pick.h)}`)}</div>` : '';
+    $('ui').innerHTML = `${label}<div class="tools" id="tools">
+      <button class="pill${tool === 'region' ? ' on' : ''}" data-t="region">${icon('area', 15)}Region<span class="k mono">R</span></button>
+      <button class="pill${tool === 'window' ? ' on' : ''}" data-t="window">${icon('window', 15)}Window<span class="k mono">W</span></button>
+      <button class="pill" data-t="full">${icon('screen', 15)}Full screen<span class="k mono">F</span></button>
+      <span class="sep"></span><button class="pill" data-t="esc" style="color:rgba(255,255,255,.65)">Esc</button></div>`;
+    if (label) { const s = $('size'); s.style.left = `${pick.x}px`; s.style.top = `${Math.max(4, pick.y - 26)}px`; }
+    $('tools').querySelectorAll('button').forEach((b) => (b.onclick = (e) => {
+      e.stopPropagation();
+      const t = b.dataset.t;
+      if (t === 'full') done(null); else if (t === 'esc') cancel(); else { tool = t; box = null; hot = null; paint(); }
+    }));
+  }
+  const region = () => mode === 'region' && swept;
+  $('wrap').addEventListener('pointerdown', (e) => {
+    if (!region() || e.target.closest('.tools')) return;
+    if (tool === 'window') { const w = under(e.clientX, e.clientY); if (w) done([w.x, w.y, w.w, w.h]); return; }
+    start = { x: e.clientX, y: e.clientY }; box = { x: e.clientX, y: e.clientY, w: 0, h: 0 }; paint();
+  });
+  addEventListener('pointermove', (e) => {
+    if (!region()) return;
+    if (tool === 'window') { const w = under(e.clientX, e.clientY); if (w !== hot) { hot = w; paint(); } return; }
+    if (start) { box = { x: Math.min(start.x, e.clientX), y: Math.min(start.y, e.clientY), w: Math.abs(e.clientX - start.x), h: Math.abs(e.clientY - start.y) }; paint(); }
+  });
+  addEventListener('pointerup', () => {
+    if (!start) return;
+    start = null;
+    if (box && box.w > 6 && box.h > 6) done([box.x, box.y, box.w, box.h]); else { box = null; paint(); }
+  });
+  addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') return cancel();
+    if (!region()) return;
+    const k = e.key.toLowerCase();
+    if (e.key === 'Enter' || k === 'f') done(null);
+    if (k === 'r') { tool = 'region'; hot = null; paint(); }
+    if (k === 'w') { tool = 'window'; box = null; paint(); }
+  });
+</script>
+</body>
+</html>

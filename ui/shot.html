@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Kakkoii shot</title>
+<link rel="stylesheet" href="theme.css" />
+<style>
+  /* Sage's shot card: the capture condenses out of a blur beside the orb. */
+  .card { width: 100%; height: 100%; padding: 12px; display: flex; flex-direction: column; gap: 10px; animation: in .2s ease-out both; }
+  @keyframes in { from { opacity: 0 } }
+  .head { display: flex; align-items: center; gap: 8px; padding-left: 4px; }
+  .cap { font-size: 10.5px; letter-spacing: 1.5px; color: var(--text-2); }
+  .dim { font-size: 10.5px; color: var(--muted); }
+  .x { margin-left: auto; width: 26px; height: 26px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255,255,255,.08); color: var(--text-2); display: grid; place-items: center; cursor: pointer; }
+  .frame { position: relative; flex: 1; min-height: 0; border-radius: 12px; border: 1px solid var(--line); overflow: hidden; background: rgba(255,255,255,.08); }
+  .frame img { width: 100%; height: 100%; object-fit: contain; display: block; filter: blur(10px) contrast(1.6); transform: scale(1.06);
+    transition: filter .55s cubic-bezier(.2,.8,.2,1), transform .55s cubic-bezier(.2,.8,.2,1); }
+  .frame img.in { filter: none; transform: none; }
+  .acts { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .acts button { display: flex; align-items: center; justify-content: center; gap: 7px; height: 38px; border-radius: 12px; cursor: pointer; font-size: 12.5px; font-weight: 500;
+    border: none; background: rgba(255,255,255,.08); color: var(--text); transition: transform .3s var(--spring), background .15s; }
+  .acts button:hover { background: rgba(255,255,255,.13); }
+  .acts button:active { transform: scale(.95); }
+  .acts button.go { background: #fff; color: #000; }
+  .note { font-size: 11.5px; color: var(--text-2); padding-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<div class="card glass" id="card">
+  <div class="head" data-tauri-drag-region>
+    <span class="cap mono" data-tauri-drag-region>CAPTURED</span>
+    <span class="dim mono" id="dim" data-tauri-drag-region></span>
+    <button class="x" id="close" title="Close (Esc)"></button>
+  </div>
+  <div class="frame"><img id="img" alt="" /></div>
+  <div class="acts">
+    <button class="go" id="copy"></button>
+    <button id="show"></button>
+    <button id="path"></button>
+  </div>
+  <div class="note" id="note"></div>
+</div>
+<script type="module">
+  import { liquidGlass } from './glass.js';
+  import { icon } from './icons.js';
+  const { invoke, convertFileSrc } = window.__TAURI__.core;
+  const win = window.__TAURI__.window.getCurrentWindow();
+  const $ = (id) => document.getElementById(id);
+  liquidGlass($('card'));
+
+  $('close').innerHTML = icon('x', 11);
+  $('copy').innerHTML = `${icon('copy', 14)} Copy`;
+  $('show').innerHTML = `${icon('folder', 14)} Show`;
+  $('path').textContent = 'Copy path';
+
+  const shot = await invoke('shot_info');
+  const close = () => void win.close();
+  if (!shot) close();
+  $('dim').textContent = `${shot.width}×${shot.height}`;
+  $('note').textContent = `Saved to ${shot.file.split(/[\\/]/).slice(-2).join('\\')}`;
+  const img = $('img');
+  img.onload = () => requestAnimationFrame(() => img.classList.add('in'));
+  img.src = convertFileSrc(shot.file);
+
+  const say = (t) => { $('note').textContent = t; };
+  $('copy').onclick = async () => { try { await invoke('shot_copy'); say('Copied. Paste it anywhere.'); } catch (e) { say(String(e)); } };
+  $('show').onclick = () => void invoke('reveal', { path: shot.file });
+  $('path').onclick = async () => { await navigator.clipboard.writeText(shot.file); say('Path copied.'); };
+  $('close').onclick = close;
+  addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); if ((e.ctrlKey || e.metaKey) && e.key === 'c') $('copy').click(); });
+</script>
+</body>
+</html>

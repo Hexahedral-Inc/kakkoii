@@ -26,11 +26,12 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; media-src 'self' mediastream: blob: asset: http://asset.localhost; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; media-src 'self' mediastream: blob: asset: http://asset.localhost; img-src 'self' data: blob: asset: http://asset.localhost; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$VIDEO/Kakkoii/**"
+          "$VIDEO/Kakkoii/**",
+          "$PICTURE/Kakkoii/**"
         ]
       }
     }
