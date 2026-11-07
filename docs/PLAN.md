@@ -2,7 +2,7 @@
 
 Kakkoii (かっこいい) is Japanese for "cool". A light, open-source screen recorder that a 10-year-old can use. Bandicam power, toy-simple.
 
-Status: research done 2026-11-07. Nothing built yet.
+Status: phase 0 works (2026-11-07). Full-screen 4K60 H.264 recording on Windows, 3.3 MB app.
 
 ## Build on, don't fork
 

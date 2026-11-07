@@ -1,0 +1,29 @@
+[package]
+name = "kakkoii"
+version = "0.0.1"
+description = "A light, open-source screen recorder"
+license = "MIT"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+window-vibrancy = "0.6"
+
+[target.'cfg(windows)'.dependencies]
+windows-capture = "2"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "s"
+strip = true
+panic = "abort"
