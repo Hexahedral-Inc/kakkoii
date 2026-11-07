@@ -7,7 +7,7 @@ A light, open-source screen recorder. Pick a mode, press record, done. Windows t
 - **Bar:** a command bar, bottom centre. Type a window name to record it. Alt+Shift+R opens it, or stops a recording.
 - **Modes:** the screen, an area you drag out, the screen with your face, just your face, or any window.
 - **Pause:** from the island or Alt+Shift+P. The pause is cut out of the video.
-- **Orb:** a small black hole floats over your screen (it never shows in a recording). Its disk glows white, turns red-hot while recording, and goes amber and still when paused. Click it (or **Alt+Shift+K**) and its menu comes out as little lenses orbiting it: Screen, Area, A window, With face, Just face, Screenshot, Face bubble, Recordings, Settings. Drag it anywhere.
+- **Orb:** the Kakkoii logo in a black glass lens with a turning chrome ring floats over your screen (it never shows in a recording). While recording, the red dot beats and the ring becomes a timer: chips fill red every 5 seconds, a lap a minute, with the time written in a break at the bottom. Click it (or **Alt+Shift+K**) and its menu comes out as little lenses orbiting it: Screen, Area, A window, With face, Just face, Screenshot, Face bubble, Recordings, Settings. Drag it anywhere.
 - **Screenshot (Alt+Shift+S):** the screen freezes under a dither sweep; drag a box, click a window, or press Enter for all of it. A card with the shot comes out beside the orb: Copy, Show, Copy path. Saved in Pictures\Kakkoii.
 - **Island:** while recording, a small capsule at the top shows the time and a Stop button. It never shows up in the video.
 - **Sound:** what the computer plays, and your mic. Face modes turn the mic on.
