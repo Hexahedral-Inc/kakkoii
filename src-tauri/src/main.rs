@@ -7,6 +7,8 @@ mod audio;
 #[cfg(windows)]
 mod engine;
 #[cfg(windows)]
+mod keys;
+#[cfg(windows)]
 mod mp4tail;
 #[cfg(windows)]
 mod recorder;
@@ -152,6 +154,84 @@ async fn shot_copy(app: tauri::AppHandle) -> Result<(), String> {
     shot::shot_copy(&app)
 }
 
+/// What each open window shows, small, for the bar's grid.
+#[cfg(windows)]
+#[tauri::command]
+async fn window_thumbs() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(|| serde_json::json!(shot::thumbs())).await.map_err(|e| e.to_string())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn hotkeys(keys: State<keys::Keys>) -> serde_json::Value {
+    serde_json::json!(keys.all())
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn set_hotkey(app: tauri::AppHandle, keys: State<keys::Keys>, action: String, accel: String) -> Result<serde_json::Value, String> {
+    keys.set(&app, &action, &accel).map(|m| serde_json::json!(m))
+}
+
+/// The icon by the clock: click for the orb's menu, right-click for a short menu.
+#[cfg(windows)]
+fn tray(app: &tauri::App, engine: Arc<Engine>) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    use tauri::Emitter;
+    let item = |id: &str, text: &str| MenuItem::with_id(app, id, text, true, None::<&str>);
+    let menu = Menu::with_items(app, &[
+        &item("orb", "Open Kakkoii")?,
+        &PredefinedMenuItem::separator(app)?,
+        &item("screen", "Record the screen / stop")?,
+        &item("shot", "Screenshot")?,
+        &item("files", "Recordings")?,
+        &PredefinedMenuItem::separator(app)?,
+        &item("quit", "Quit Kakkoii")?,
+    ])?;
+    let e = engine.clone();
+    TrayIconBuilder::with_id("kakkoii")
+        .icon(app.default_window_icon().cloned().expect("app icon"))
+        .tooltip("Kakkoii")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(move |app, ev| match ev.id().as_ref() {
+            "orb" => e.orb_menu(),
+            "screen" if e.recording() => {
+                let e = e.clone();
+                std::thread::spawn(move || {
+                    recorder::log("stop via tray");
+                    let _ = e.stop();
+                });
+            }
+            // The orb starts it, with your quality and sound settings.
+            "screen" => {
+                let _ = e.open_orb();
+                let _ = app.emit_to("orb", "kakkoii://do", "screen");
+            }
+            "shot" => {
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    let _ = shot::capture(&app, "region");
+                });
+            }
+            "files" => {
+                if let Ok(dir) = e.dir() {
+                    let _ = std::process::Command::new("explorer").arg(dir).spawn();
+                }
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(move |_, ev| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev {
+                engine.orb_menu();
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
+
 /// A page writing to the debug log (the camera says which camera it got).
 #[cfg(windows)]
 #[tauri::command]
@@ -224,7 +304,6 @@ pub(crate) fn hide_from_capture(window: &tauri::WebviewWindow) {
 
 #[cfg(windows)]
 fn main() {
-    use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
     // `kakkoii --selftest <secs> <out.mp4> [window query]` records headless and exits.
     let args: Vec<String> = std::env::args().collect();
@@ -241,15 +320,6 @@ fn main() {
         return;
     }
 
-    // Alt+Shift+R: open the bar, or stop if we're recording.
-    let hotkey = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyR);
-    // Alt+Shift+P: pause or carry on.
-    let pause_key = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyP);
-    // Alt+Shift+K: the orb and its menu.
-    let orb_key = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyK);
-    // Alt+Shift+S: a screenshot (drag a box, click a window, or Enter for all of it).
-    let shot_key = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyS);
-
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(e) = app.try_state::<Arc<Engine>>() {
@@ -258,38 +328,7 @@ fn main() {
         }))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(move |app, sc, ev| {
-                    if sc == &shot_key && ev.state() == ShortcutState::Pressed {
-                        let app = app.clone();
-                        std::thread::spawn(move || {
-                            let _ = shot::capture(&app, "region");
-                        });
-                    }
-                    if sc == &orb_key && ev.state() == ShortcutState::Pressed {
-                        if let Some(e) = app.try_state::<Arc<Engine>>() {
-                            e.orb_menu();
-                        }
-                    }
-                    if sc == &pause_key && ev.state() == ShortcutState::Pressed {
-                        if let Some(e) = app.try_state::<Arc<Engine>>() {
-                            let paused = e.status()["paused"].as_bool().unwrap_or(false);
-                            let _ = e.pause(!paused);
-                        }
-                    }
-                    if sc == &hotkey && ev.state() == ShortcutState::Pressed {
-                        if let Some(e) = app.try_state::<Arc<Engine>>() {
-                            let e = e.inner().clone();
-                            std::thread::spawn(move || {
-                                if e.recording() {
-                                    recorder::log("stop via hotkey");
-                                    let _ = e.stop();
-                                } else {
-                                    e.show_bar();
-                                }
-                            });
-                        }
-                    }
-                })
+                .with_handler(|app, sc, ev| keys::handle(app, sc, ev.state()))
                 .build(),
         )
         .setup(move |app| {
@@ -297,11 +336,10 @@ fn main() {
             app.manage(engine.clone());
             app.manage(shot::Shots::default());
             let config = std::env::var("APPDATA").map(std::path::PathBuf::from).unwrap_or_else(|_| std::env::temp_dir()).join("Kakkoii");
-            api::serve(engine.clone(), config);
-            let _ = app.global_shortcut().register(hotkey);
-            let _ = app.global_shortcut().register(pause_key);
-            let _ = app.global_shortcut().register(orb_key);
-            let _ = app.global_shortcut().register(shot_key);
+            api::serve(engine.clone(), config.clone());
+            app.manage(keys::Keys::load(config));
+            app.state::<keys::Keys>().register_all(app.handle());
+            tray(app, engine.clone())?;
 
             // The bar sits bottom centre, like Sage's.
             let bar = app.get_webview_window("main").unwrap();
@@ -317,7 +355,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             start_recording, stop_recording, pause_recording, ui_log, pick_area, area_chosen, set_camera, status, targets, recordings,
-            agent_command, open_folder, reveal, glass_frame, trim_recording, open_trim, show_bar, quit, capture, veil_image, veil_info, veil_done, veil_cancel, shot_info, shot_copy
+            agent_command, open_folder, reveal, glass_frame, trim_recording, open_trim, show_bar, quit, capture, veil_image, veil_info, veil_done, veil_cancel, shot_info, shot_copy, hotkeys, set_hotkey, window_thumbs
         ])
         .run(tauri::generate_context!())
         .expect("error while running kakkoii");

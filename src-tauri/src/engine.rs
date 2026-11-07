@@ -409,7 +409,7 @@ impl Engine {
         Ok(())
     }
 
-    /// Alt+Shift+K: bring the orb back and open (or close) its menu.
+    /// The menu hotkey (Alt+K) and the tray icon: bring the orb back and open (or close) its menu.
     pub fn orb_menu(&self) {
         let _ = self.open_orb();
         if let Some(w) = self.app.get_webview_window("orb") {

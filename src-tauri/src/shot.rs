@@ -244,3 +244,33 @@ pub fn shot_copy(app: &AppHandle) -> Result<(), String> {
     cb.set_image(arboard::ImageData { width: img.width() as usize, height: img.height() as usize, bytes: std::borrow::Cow::Borrowed(img.as_raw()) })
         .map_err(|e| e.to_string())
 }
+
+/// Small pictures of what each open window shows, for the bar's window grid.
+/// Minimised windows have nothing to show, so they come back without one.
+pub fn thumbs() -> Vec<Value> {
+    use base64::Engine as _;
+    let mut out = Vec::new();
+    for w in xcap::Window::all().unwrap_or_default() {
+        let title = w.title().unwrap_or_default();
+        let (ww, wh) = (w.width().unwrap_or(0), w.height().unwrap_or(0));
+        if title.is_empty() || title.starts_with("Kakkoii") || ww < 160 || wh < 100 {
+            continue;
+        }
+        let process = w.app_name().unwrap_or_default();
+        let thumb = if w.is_minimized().unwrap_or(false) {
+            None
+        } else {
+            w.capture_image().ok().and_then(|img| {
+                let img = image::DynamicImage::ImageRgba8(img).thumbnail(400, 250).to_rgb8();
+                let mut jpg = Vec::new();
+                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg, 72).encode_image(&img).ok()?;
+                Some(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(jpg)))
+            })
+        };
+        out.push(json!({ "title": title, "process": process, "thumb": thumb }));
+        if out.len() >= 12 {
+            break;
+        }
+    }
+    out
+}
