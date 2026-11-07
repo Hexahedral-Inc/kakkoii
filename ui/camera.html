@@ -12,31 +12,91 @@
   .bubble.round { border-radius: 50%; }
   .full .bubble { inset: 0; border-radius: 0; box-shadow: none; animation: none; }
   video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); pointer-events: none; }
-  .msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-2); font-size: 12px; text-align: center; padding: 18px; }
+  .msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-2); font-size: 12px; text-align: center; padding: 18px; line-height: 1.45; }
+  /* Hover: which camera this is, and a way out. */
+  .x { position: absolute; top: 16px; right: 16px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+    background: rgba(0,0,0,.6); color: #fff; opacity: 0; transition: opacity .15s; z-index: 2; }
+  .tag { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); max-width: calc(100% - 40px); padding: 4px 9px; border-radius: 999px;
+    background: rgba(0,0,0,.6); color: #fff; font-size: 10.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 2; }
+  body:hover .x, body:hover .tag, .tag.show { opacity: 1; }
+  .full .x, .full .tag { display: none; }
 </style>
 </head>
 <body>
 <div class="bubble" id="b" data-tauri-drag-region>
   <video id="v" autoplay muted playsinline></video>
 </div>
-<script>
-  const b = document.getElementById('b');
+<div class="x" id="x" title="Close the face bubble"></div>
+<div class="tag" id="tag"></div>
+<script type="module">
+  import { icon } from './icons.js';
+  const $ = (id) => document.getElementById(id);
+  const b = $('b');
+  $('x').innerHTML = icon('x', 13);
   // ?full: the face-only recording, the whole window is the picture.
   if (location.search.includes('full')) document.body.classList.add('full');
-  // Double-click: box or circle. Scroll: bigger or smaller. Drag: anywhere.
+  // Double-click: box or circle. Scroll: bigger or smaller. Right-click: next camera. Drag: anywhere.
   b.addEventListener('dblclick', () => b.classList.toggle('round'));
-  if (window.__TAURI__ && !location.search.includes('full')) {
-    const { getCurrentWindow, LogicalSize } = window.__TAURI__.window;
-    const win = getCurrentWindow();
-    let size = 200;
-    window.addEventListener('wheel', (e) => {
-      size = Math.max(120, Math.min(480, size + (e.deltaY < 0 ? 24 : -24)));
-      void win.setSize(new LogicalSize(size, size));
-    }, { passive: true });
+  if (window.__TAURI__) {
+    $('x').onclick = () => void window.__TAURI__.core.invoke('set_camera', { on: false });
+    if (!location.search.includes('full')) {
+      const { getCurrentWindow, LogicalSize } = window.__TAURI__.window;
+      const win = getCurrentWindow();
+      let size = 200;
+      window.addEventListener('wheel', (e) => {
+        size = Math.max(120, Math.min(480, size + (e.deltaY < 0 ? 24 : -24)));
+        void win.setSize(new LogicalSize(size, size));
+      }, { passive: true });
+    }
   }
-  navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, facingMode: 'user' }, audio: false })
-    .then((s) => { document.getElementById('v').srcObject = s; })
-    .catch((e) => { b.innerHTML = `<div class="msg">No camera found<br>${e.name}</div>`; });
+
+  // Laptops often have two cameras: the real one and an IR one for Windows Hello,
+  // which gives a black or grey picture. Never pick the IR one on our own.
+  const IR = /\bIR\b|infrared|hello/i;
+  let cams = [], stream = null;
+  const say = (html) => { $('v').hidden = true; b.querySelector('.msg')?.remove(); b.insertAdjacentHTML('beforeend', `<div class="msg">${html}</div>`); };
+  function tag(text) {
+    $('tag').textContent = text; $('tag').classList.add('show');
+    clearTimeout(tag.t); tag.t = setTimeout(() => $('tag').classList.remove('show'), 2200);
+  }
+  async function open(id) {
+    stream?.getTracks().forEach((t) => t.stop());
+    const video = { width: 1280, height: 720, ...(id ? { deviceId: { exact: id } } : { facingMode: 'user' }) };
+    stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+    const v = $('v'); v.hidden = false; b.querySelector('.msg')?.remove();
+    v.srcObject = stream;
+    const label = stream.getVideoTracks()[0]?.label || 'Camera';
+    localStorage.setItem('camera', stream.getVideoTracks()[0]?.getSettings().deviceId || '');
+    tag(label.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)$/i, ''));
+  }
+  async function start() {
+    try {
+      await open(localStorage.getItem('camera') || null);
+    } catch (e) {
+      try { await open(null); } catch (e2) {
+        say(e2.name === 'NotAllowedError'
+          ? 'Camera blocked<br>Settings › Privacy › Camera'
+          : e2.name === 'NotReadableError' ? 'Another app is using the camera' : `No camera found<br>${e2.name}`);
+        return;
+      }
+    }
+    // Labels only show once we have the camera, so pick again now if we landed on IR.
+    cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+    const cur = stream.getVideoTracks()[0];
+    if (IR.test(cur?.label || '')) {
+      const real = cams.find((c) => !IR.test(c.label));
+      if (real) await open(real.deviceId).catch(() => {});
+    }
+  }
+  addEventListener('contextmenu', async (e) => {
+    e.preventDefault();
+    if (cams.length < 2) { tag('Only one camera'); return; }
+    const cur = stream?.getVideoTracks()[0]?.getSettings().deviceId;
+    const next = cams[(cams.findIndex((c) => c.deviceId === cur) + 1) % cams.length];
+    await open(next.deviceId).catch((err) => tag(`${next.label}: ${err.name}`));
+  });
+  void start();
 </script>
 </body>
 </html>

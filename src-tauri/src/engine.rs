@@ -46,6 +46,8 @@ struct Inner {
     live: Option<Live>,
     next_id: u64,
     camera: bool,
+    // The recording put the face bubble up, so stopping takes it down again.
+    camera_by_rec: bool,
     last: Option<String>,
     // What the bar asked for while the area picker is open.
     pending: Option<StartOpts>,
@@ -116,7 +118,9 @@ impl Engine {
             std::thread::sleep(std::time::Duration::from_millis(900)); // the camera warms up
             opts.target = Target::Hwnd { hwnd: w.hwnd().map_err(|e| e.to_string())?.0 as isize };
         } else if let Some(on) = opts.camera {
+            let was = self.inner.lock().unwrap().camera;
             let _ = self.set_camera(on);
+            self.inner.lock().unwrap().camera_by_rec = on && !was;
         }
         let (id, status) = {
             let mut inner = self.inner.lock().unwrap();
@@ -153,7 +157,8 @@ impl Engine {
         let path = live.session.stop()?;
         let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         self.inner.lock().unwrap().last = Some(path.clone());
-        if live.face_only {
+        let by_rec = std::mem::take(&mut self.inner.lock().unwrap().camera_by_rec);
+        if live.face_only || by_rec {
             if let Some(w) = self.app.get_webview_window("camera") {
                 let _ = w.close();
             }
@@ -207,7 +212,12 @@ impl Engine {
         } else if let Some(w) = self.app.get_webview_window("camera") {
             let _ = w.close();
         }
-        self.inner.lock().unwrap().camera = on;
+        let mut inner = self.inner.lock().unwrap();
+        inner.camera = on;
+        if !on {
+            inner.camera_by_rec = false;
+        }
+        drop(inner);
         self.emit();
         Ok(json!({ "camera": on }))
     }
