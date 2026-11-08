@@ -66,7 +66,7 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="body glass" id="body">
+  <div class="body metal" id="body">
     <div id="top"></div>
     <div class="list" id="list"></div>
     <div class="foot">
@@ -79,7 +79,6 @@
 </div>
 
 <script type="module">
-  import { liquidGlass } from './glass.js';
   import { icon } from './icons.js';
 
   const { invoke } = window.__TAURI__.core;
@@ -90,7 +89,6 @@
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
-  liquidGlass($('body'));
 
   const QUALITY = { balanced: 'Balanced · 60 fps', high: 'High · 60 fps', small: 'Small · 30 fps' };
   const ORDER = ['balanced', 'high', 'small'];

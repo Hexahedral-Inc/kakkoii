@@ -26,7 +26,7 @@
 </style>
 </head>
 <body>
-<div class="card glass" id="card">
+<div class="card metal" id="card">
   <div class="head" data-tauri-drag-region>
     <span class="cap mono" data-tauri-drag-region>CAPTURED</span>
     <span class="dim mono" id="dim" data-tauri-drag-region></span>
@@ -41,12 +41,10 @@
   <div class="note" id="note"></div>
 </div>
 <script type="module">
-  import { liquidGlass } from './glass.js';
   import { icon } from './icons.js';
   const { invoke, convertFileSrc } = window.__TAURI__.core;
   const win = window.__TAURI__.window.getCurrentWindow();
   const $ = (id) => document.getElementById(id);
-  liquidGlass($('card'));
 
   $('close').innerHTML = icon('x', 11);
   $('copy').innerHTML = `${icon('copy', 14)} Copy`;

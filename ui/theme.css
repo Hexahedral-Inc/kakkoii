@@ -25,9 +25,19 @@ button, input { font-family: 'Geist', system-ui, sans-serif; }
 .ic { display: inline-flex; flex: none; }
 .ic svg { fill: currentColor; display: block; }
 
-/* Liquid glass: the page draws it (glass.js, a canvas under the content). */
-.glass { position: relative; isolation: isolate; border-radius: 14px; overflow: hidden; background: transparent; }
-.glass > .lg { z-index: -1 !important; }
+/* Solid black metal, the orb's material: light from the top left, a fine brushed
+   grain, and a still chrome rim. Plain CSS, painted once: no screen grabs, no frames. */
+.metal { position: relative; isolation: isolate; border-radius: 14px; overflow: hidden;
+  background:
+    radial-gradient(ellipse 70% 55% at 22% -8%, rgba(255,255,255,.11), transparent 62%),
+    repeating-linear-gradient(90deg, rgba(255,255,255,.009) 0 1px, transparent 1px 3px),
+    linear-gradient(180deg, #19191c 0%, #0c0c0e 42%, #060607 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14), inset 0 -10px 24px rgba(0,0,0,.45); }
+.metal::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; z-index: 1;
+  background: conic-gradient(from 200deg, #fff, #5a5a5a 10%, #141414 22%, #8c8c8c 34%, #f2f2f2 40%, #444 52%, #111 64%, #b8b8b8 76%, #fafafa 82%, #3a3a3a 92%, #fff);
+  opacity: .55;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
 
 @keyframes breathe { 0%, 100% { opacity: .45 } 50% { opacity: 1 } }
 @keyframes chipIn { from { opacity: 0; transform: translateY(4px) scale(.96) } to { opacity: 1; transform: none } }

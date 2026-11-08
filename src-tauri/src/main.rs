@@ -269,42 +269,6 @@ fn reveal(path: String) {
     let _ = std::process::Command::new("explorer").arg(format!("/select,{path}")).spawn();
 }
 
-/// What is behind a glass window, as a JPEG, for glass.js (Sage's glass_frame):
-/// the window is left out of the capture for the instant it takes, then put back,
-/// so your own screenshots still show it.
-#[cfg(windows)]
-#[tauri::command]
-async fn glass_frame(app: tauri::AppHandle, label: String) -> Result<tauri::ipc::Response, String> {
-    let win = app.get_webview_window(&label).ok_or("no such window")?;
-    let pos = win.outer_position().map_err(|e| e.to_string())?;
-    let size = win.outer_size().map_err(|e| e.to_string())?;
-    let hwnd = win.hwnd().map_err(|e| e.to_string())?.0 as isize;
-    let bytes = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, String> {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE};
-        unsafe { SetWindowDisplayAffinity(hwnd as _, WDA_EXCLUDEFROMCAPTURE) };
-        // Two compositor frames, so the capture is composed without us.
-        std::thread::sleep(std::time::Duration::from_millis(48));
-        let shot = (|| -> Result<image::RgbaImage, String> {
-        let m = xcap::Monitor::from_point(pos.x + 2, pos.y + 2).map_err(|e| e.to_string())?;
-        let (mx, my) = (m.x().map_err(|e| e.to_string())?, m.y().map_err(|e| e.to_string())?);
-        let (mw, mh) = (m.width().map_err(|e| e.to_string())?, m.height().map_err(|e| e.to_string())?);
-        let x = (pos.x - mx).clamp(0, mw as i32 - 1) as u32;
-        let y = (pos.y - my).clamp(0, mh as i32 - 1) as u32;
-        let w = size.width.min(mw - x).max(1);
-        let h = size.height.min(mh - y).max(1);
-        m.capture_region(x, y, w, h).map_err(|e| e.to_string())
-        })();
-        unsafe { SetWindowDisplayAffinity(hwnd as _, WDA_NONE) };
-        let rgb = image::DynamicImage::ImageRgba8(shot?).to_rgb8();
-        let mut out = Vec::new();
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 80).encode_image(&rgb).map_err(|e| e.to_string())?;
-        Ok(out)
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-    Ok(tauri::ipc::Response::new(bytes))
-}
-
 /// Keeps a window out of every capture, so the controls never end up in the video.
 #[cfg(windows)]
 pub(crate) fn hide_from_capture(window: &tauri::WebviewWindow) {
@@ -367,7 +331,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             start_recording, stop_recording, pause_recording, ui_log, pick_area, area_chosen, set_camera, status, targets, recordings,
-            agent_command, open_folder, reveal, glass_frame, trim_recording, open_trim, show_bar, quit, capture, veil_image, veil_info, veil_done, veil_cancel, shot_info, shot_copy, hotkeys, set_hotkey, window_thumbs, mics, set_mic
+            agent_command, open_folder, reveal, trim_recording, open_trim, show_bar, quit, capture, veil_image, veil_info, veil_done, veil_cancel, shot_info, shot_copy, hotkeys, set_hotkey, window_thumbs, mics, set_mic
         ])
         .run(tauri::generate_context!())
         .expect("error while running kakkoii");
