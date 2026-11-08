@@ -246,31 +246,70 @@ pub fn shot_copy(app: &AppHandle) -> Result<(), String> {
 }
 
 /// Small pictures of what each open window shows, for the bar's window grid.
+/// A picture can take a second or two (the app redraws itself at full size), so
+/// the bar gets the last ones at once, and every window is pictured again in
+/// parallel, each sent to the bar (`kakkoii://thumb`) the moment it's ready.
 /// Minimised windows have nothing to show, so they come back without one.
-pub fn thumbs() -> Vec<Value> {
+static PICTURES: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+static PICTURING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn picture(id: u32) -> Option<String> {
     use base64::Engine as _;
-    let mut out = Vec::new();
+    let w = xcap::Window::all().ok()?.into_iter().find(|w| w.id().ok() == Some(id))?;
+    let img = image::DynamicImage::ImageRgba8(w.capture_image().ok()?).thumbnail(400, 250).to_rgb8();
+    let mut jpg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg, 72).encode_image(&img).ok()?;
+    Some(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(jpg)))
+}
+
+pub fn thumbs(app: &AppHandle) -> Vec<Value> {
+    use std::sync::atomic::Ordering;
+    let mut list = Vec::new();
     for w in xcap::Window::all().unwrap_or_default() {
         let title = w.title().unwrap_or_default();
         let (ww, wh) = (w.width().unwrap_or(0), w.height().unwrap_or(0));
         if title.is_empty() || title.starts_with("Kakkoii") || ww < 160 || wh < 100 {
             continue;
         }
-        let process = w.app_name().unwrap_or_default();
-        let thumb = if w.is_minimized().unwrap_or(false) {
-            None
-        } else {
-            w.capture_image().ok().and_then(|img| {
-                let img = image::DynamicImage::ImageRgba8(img).thumbnail(400, 250).to_rgb8();
-                let mut jpg = Vec::new();
-                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg, 72).encode_image(&img).ok()?;
-                Some(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(jpg)))
-            })
-        };
-        out.push(json!({ "title": title, "process": process, "thumb": thumb }));
-        if out.len() >= 12 {
+        let shown = !w.is_minimized().unwrap_or(false);
+        list.push((title, w.app_name().unwrap_or_default(), shown, w.id().unwrap_or(0)));
+        if list.len() >= 12 {
             break;
         }
+    }
+    let out = {
+        let mut kept = PICTURES.lock().unwrap();
+        kept.retain(|(t, _)| list.iter().any(|(lt, _, shown, _)| lt == t && *shown));
+        list.iter()
+            .map(|(title, process, shown, _)| {
+                let thumb = shown.then(|| kept.iter().find(|(t, _)| t == title).map(|(_, p)| p.clone())).flatten();
+                json!({ "title": title, "process": process, "thumb": thumb })
+            })
+            .collect()
+    };
+    if !PICTURING.swap(true, Ordering::SeqCst) {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            let jobs: Vec<_> = list
+                .into_iter()
+                .filter(|(_, _, shown, _)| *shown)
+                .map(|(title, _, _, id)| {
+                    let app = app.clone();
+                    std::thread::spawn(move || {
+                        if let Some(p) = picture(id) {
+                            let _ = app.emit_to("main", "kakkoii://thumb", json!({ "title": title, "thumb": p }));
+                            let mut kept = PICTURES.lock().unwrap();
+                            kept.retain(|(t, _)| *t != title);
+                            kept.push((title, p));
+                        }
+                    })
+                })
+                .collect();
+            for j in jobs {
+                let _ = j.join();
+            }
+            PICTURING.store(false, Ordering::SeqCst);
+        });
     }
     out
 }

@@ -296,6 +296,7 @@
   async function show() {
     if (open) return;
     open = true; page = 'main';
+    void invoke('window_thumbs').catch(() => {}); // the bar's window pictures, started early: "A window" opens with them
     build();
     const a = await work();
     const r = { x: centre.x - BOX / 2, y: centre.y - BOX / 2, w: BOX, h: BOX };

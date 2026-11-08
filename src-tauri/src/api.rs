@@ -89,6 +89,10 @@ fn handle(mut req: Request, engine: &Arc<Engine>, token: &str) {
         (Method::Get, "/v1/mics") => crate::audio::mics(true),
         (Method::Post, "/v1/record") => call(engine, "start_recording", body),
         (Method::Post, "/v1/stop") => engine.stop(),
+        (Method::Post, "/v1/bar") => {
+            engine.show_bar();
+            Ok(json!({ "shown": true }))
+        }
         (Method::Post, "/v1/pause") => engine.pause(true),
         (Method::Post, "/v1/resume") => engine.pause(false),
         (Method::Post, "/v1/camera") => call(engine, "camera", body),
@@ -104,7 +108,7 @@ fn handle(mut req: Request, engine: &Arc<Engine>, token: &str) {
 
 const ROUTES: &[&str] = &[
     "GET /health", "GET /v1/status", "GET /v1/targets", "GET /v1/recordings",
-    "POST /v1/record", "POST /v1/stop", "POST /v1/camera", "POST /v1/compress", "POST /v1/trim", "POST /mcp",
+    "POST /v1/record", "POST /v1/stop", "POST /v1/bar", "POST /v1/camera", "POST /v1/compress", "POST /v1/trim", "POST /mcp",
 ];
 
 /// One dispatcher for REST and MCP tool calls.

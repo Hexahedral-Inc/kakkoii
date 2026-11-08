@@ -157,8 +157,8 @@ async fn shot_copy(app: tauri::AppHandle) -> Result<(), String> {
 /// What each open window shows, small, for the bar's grid.
 #[cfg(windows)]
 #[tauri::command]
-async fn window_thumbs() -> Result<serde_json::Value, String> {
-    tauri::async_runtime::spawn_blocking(|| serde_json::json!(shot::thumbs())).await.map_err(|e| e.to_string())
+async fn window_thumbs(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || serde_json::json!(shot::thumbs(&app))).await.map_err(|e| e.to_string())
 }
 
 #[cfg(windows)]

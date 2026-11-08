@@ -202,7 +202,12 @@
     render();
     void pictures();
   }
-  // What each window shows, fetched after the list so the bar opens at once; again every few seconds while it's open.
+  // What each window shows: the last pictures at once, then each new one as it lands; again every few seconds while it's open.
+  let drawT = 0;
+  listen('kakkoii://thumb', (e) => {
+    thumbs[e.payload.title] = e.payload.thumb;
+    if (!drawT) drawT = requestAnimationFrame(() => { drawT = 0; render(); });
+  });
   let picT = 0, picBusy = false;
   async function pictures() {
     clearTimeout(picT);
