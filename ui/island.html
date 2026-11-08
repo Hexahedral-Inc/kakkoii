@@ -29,6 +29,13 @@
   .stop:hover { background: rgba(255,255,255,.08); }
   .stop:active { transform: scale(.94); }
   .stop i { width: 9px; height: 9px; border-radius: 2px; background: var(--rec); }
+  /* The sound meter: five bands low to high, LED segments, green then amber then red. */
+  .eq { display: flex; align-items: stretch; gap: 2px; height: 18px; flex: none; }
+  .eq i { width: 4px; position: relative; background: rgba(255,255,255,.07);
+    -webkit-mask: repeating-linear-gradient(to top, #000 0 2px, transparent 2px 3px); mask: repeating-linear-gradient(to top, #000 0 2px, transparent 2px 3px); }
+  .eq b { position: absolute; inset: 0; clip-path: inset(100% 0 0 0);
+    background: linear-gradient(to top, #30d158 0 52%, #ffd60a 52% 78%, #ff453a 78%); filter: drop-shadow(0 0 3px rgba(48,209,88,.5)); }
+  .held .eq { opacity: .35; }
 </style>
 </head>
 <body>
@@ -36,6 +43,7 @@
   <div class="cap" id="cap" data-tauri-drag-region>
     <span class="rec" data-tauri-drag-region></span>
     <span class="t mono" id="t" data-tauri-drag-region>0:00</span>
+    <span class="eq" id="eq" title="Sound going into the video" data-tauri-drag-region><i><b></b></i><i><b></b></i><i><b></b></i><i><b></b></i><i><b></b></i></span>
     <span class="lbl" id="lbl" data-tauri-drag-region></span>
     <span class="gap" data-tauri-drag-region></span>
     <button class="btn" id="pause" title="Pause (Alt+Shift+P)"></button>
@@ -67,12 +75,31 @@
       clearInterval(tick); upd(); if (!paused) tick = setInterval(upd, 1000);
     } else {
       clearInterval(tick);
+      want.fill(0);
       $('cap').classList.add('out');
     }
   }
   $('stop').onclick = () => void invoke('stop_recording');
   $('pause').onclick = () => void invoke('pause_recording', { on: !paused });
   $('cam').onclick = () => void invoke('set_camera', { on: !camera });
+  // ── the meter: levels arrive 25 times a second, frames ease between them ──
+  const bars = [...$('eq').querySelectorAll('b')], cur = [0, 0, 0, 0, 0], want = [0, 0, 0, 0, 0];
+  const LIFT = [0, 2, 5, 9, 13]; // dB: speech is quieter up high, so the upper bands get a lift
+  let raf = 0;
+  function draw() {
+    raf = 0;
+    let moving = false;
+    for (let i = 0; i < 5; i++) {
+      cur[i] += (want[i] - cur[i]) * (want[i] > cur[i] ? 0.55 : 0.12); // jump up, fall slowly
+      if (cur[i] > 0.004 || want[i] > 0) moving = true;
+      bars[i].style.clipPath = `inset(${((1 - cur[i]) * 100).toFixed(1)}% 0 0 0)`;
+    }
+    if (moving) raf = requestAnimationFrame(draw);
+  }
+  listen('kakkoii://level', (e) => {
+    e.payload.forEach((p, i) => { want[i] = Math.max(0, Math.min(1, (20 * Math.log10(Math.max(p, 1e-6)) + LIFT[i] + 48) / 44)); });
+    if (!raf) raf = requestAnimationFrame(draw);
+  });
   listen('kakkoii://state', (e) => render(e.payload));
   invoke('status').then(render);
 </script>

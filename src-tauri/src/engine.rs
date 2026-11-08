@@ -135,6 +135,15 @@ impl Engine {
             (id, Self::status_of(&inner))
         };
         self.island(true);
+        // The island's sound meter, 25 times a second while this recording runs.
+        let me = self.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            if !me.inner.lock().unwrap().live.as_ref().is_some_and(|l| l.id == id) {
+                break;
+            }
+            let _ = me.app.emit_to("island", "kakkoii://level", crate::audio::bands());
+        });
         if let Some(secs) = opts.max_seconds {
             let me = self.clone();
             std::thread::spawn(move || {
@@ -393,7 +402,8 @@ impl Engine {
             .transparent(true)
             .shadow(false)
             .always_on_top(true)
-            .skip_taskbar(true)
+            // Its taskbar button is Kakkoii's: pin it, click it for the menu.
+            .skip_taskbar(false)
             .resizable(false)
             .focused(false)
             .visible(false)

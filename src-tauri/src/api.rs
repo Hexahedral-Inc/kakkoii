@@ -86,6 +86,7 @@ fn handle(mut req: Request, engine: &Arc<Engine>, token: &str) {
         (Method::Get, "/v1/status") => Ok(engine.status()),
         (Method::Get, "/v1/targets") => Ok(engine.targets()),
         (Method::Get, "/v1/recordings") => engine.recordings(),
+        (Method::Get, "/v1/mics") => crate::audio::mics(true),
         (Method::Post, "/v1/record") => call(engine, "start_recording", body),
         (Method::Post, "/v1/stop") => engine.stop(),
         (Method::Post, "/v1/pause") => engine.pause(true),

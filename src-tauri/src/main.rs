@@ -163,6 +163,18 @@ async fn window_thumbs() -> Result<serde_json::Value, String> {
 
 #[cfg(windows)]
 #[tauri::command]
+async fn mics(probe: Option<bool>) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || audio::mics(probe.unwrap_or(false))).await.map_err(|e| e.to_string())?
+}
+
+#[cfg(windows)]
+#[tauri::command]
+fn set_mic(name: Option<String>) -> Result<(), String> {
+    audio::choose_mic(name.as_deref())
+}
+
+#[cfg(windows)]
+#[tauri::command]
 fn hotkeys(keys: State<keys::Keys>) -> serde_json::Value {
     serde_json::json!(keys.all())
 }
@@ -355,7 +367,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             start_recording, stop_recording, pause_recording, ui_log, pick_area, area_chosen, set_camera, status, targets, recordings,
-            agent_command, open_folder, reveal, glass_frame, trim_recording, open_trim, show_bar, quit, capture, veil_image, veil_info, veil_done, veil_cancel, shot_info, shot_copy, hotkeys, set_hotkey, window_thumbs
+            agent_command, open_folder, reveal, glass_frame, trim_recording, open_trim, show_bar, quit, capture, veil_image, veil_info, veil_done, veil_cancel, shot_info, shot_copy, hotkeys, set_hotkey, window_thumbs, mics, set_mic
         ])
         .run(tauri::generate_context!())
         .expect("error while running kakkoii");

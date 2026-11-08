@@ -123,7 +123,7 @@
   const get = () => ({
     quality: localStorage.getItem('quality') || 'balanced',
     system: localStorage.getItem('sound.system') !== 'off',
-    mic: localStorage.getItem('sound.mic') === 'on',
+    mic: localStorage.getItem('sound.mic') !== 'off',
   });
   const opts = (extra = {}) => { const g = get(); return { quality: g.quality, sound: { system: g.system, mic: g.mic }, ...extra }; };
 
@@ -146,8 +146,12 @@
     catch (err) { keyMsg[a] = String(err).replace(/ isn't a key.*| already does.*| is taken.*/, (m) => m.includes('taken') ? ': taken' : m.includes('already') ? ': in use' : ': no'); }
     rebuild();
   }, true);
-  const rebuild = () => { if (open && page === 'keys') { const h = hover; build(); hover = h; frame(performance.now(), true); } };
+  const rebuild = () => { if (open && (page === 'keys' || page === 'settings')) { const h = hover; build(); hover = h; frame(performance.now(), true); } };
   let page = 'main';
+  // The mics Windows has; the one Kakkoii uses is kept on the Rust side.
+  let mics = { mics: [], picked: null };
+  const loadMics = () => invoke('mics').then((m) => { mics = m; rebuild(); }).catch(() => {});
+  const micShort = (n) => (n || '').replace(/^Microphone( Array)?\s*\(?(\d+- )?/i, '').replace(/\)$/, '').replace(/ for Digital Microphones| Technology/gi, '').slice(0, 16) || 'Mic';
 
   function items() {
     const g = get();
@@ -156,6 +160,10 @@
       { id: 'quality', icon: 'quality', label: QUALITY[g.quality], keep: true, run: () => localStorage.setItem('quality', ORDER[(ORDER.indexOf(g.quality) + 1) % 3]) },
       { id: 'system', icon: g.system ? 'speaker' : 'speakerOff', label: g.system ? 'Sound on' : 'Sound off', off: !g.system, keep: true, run: () => localStorage.setItem('sound.system', g.system ? 'off' : 'on') },
       { id: 'mic', icon: g.mic ? 'mic' : 'micOff', label: g.mic ? 'Mic on' : 'Mic off', off: !g.mic, keep: true, run: () => localStorage.setItem('sound.mic', g.mic ? 'off' : 'on') },
+      { id: 'whichmic', icon: 'mic', label: mics.picked ? micShort(mics.picked) : 'Default mic', keep: true, run: async () => {
+        const names = [null, ...mics.mics.map((m) => m.name)], next = names[(names.indexOf(mics.picked) + 1) % names.length];
+        await invoke('set_mic', { name: next }); mics.picked = next;
+      } },
       { id: 'keys', icon: 'list', label: 'Hotkeys', keep: true, run: () => go('keys') },
       { id: 'agents', icon: 'agents', label: 'Copy MCP', run: async () => navigator.clipboard.writeText(await invoke('agent_command')) },
       { id: 'hide', icon: 'hide', label: 'Hide orb', run: () => void win.hide() },
@@ -240,7 +248,7 @@
     await shut(true);
     it.run();
   }
-  async function go(next) { await animate(0, CLOSE_MS * 0.7); page = next; build(); await animate(1, OPEN_MS); }
+  async function go(next) { if (next === 'settings') loadMics(); await animate(0, CLOSE_MS * 0.7); page = next; build(); await animate(1, OPEN_MS); }
 
   function frame(now, once) {
     if (!rect) return;
@@ -310,7 +318,8 @@
   const toggle = () => (open ? shut() : show());
 
   // ── the orb: click opens, drag moves ──
-  let down = null;
+  let down = null, lastDown = 0;
+  addEventListener('pointerdown', () => { lastDown = Date.now(); }, true);
   $('orb').addEventListener('pointerdown', (e) => { down = { x: e.screenX, y: e.screenY, b: e.button }; });
   $('orb').addEventListener('pointermove', (e) => {
     if (!down || down.b !== 0 || open) return;
@@ -320,7 +329,13 @@
   addEventListener('contextmenu', (e) => { e.preventDefault(); if (!open) void show(); });
   document.body.addEventListener('click', (e) => { if (open && e.target === document.body) void shut(); });
   addEventListener('keydown', (e) => { if (e.key === 'Escape' && !grabbing) void shut(); });
-  win.onFocusChanged(({ payload }) => { if (!payload && open && !anim) void shut(); });
+  win.onFocusChanged(({ payload }) => {
+    if (!payload && open && !anim) void shut();
+    // Focus that didn't come from a click on the orb came from its taskbar button: open the menu.
+    if (payload && !open) setTimeout(() => { if (!open && Date.now() - lastDown > 400) void show(); }, 120);
+  });
+  // Clicking the taskbar button of the focused orb minimises it: undo that, and toggle the menu.
+  win.onResized(async () => { if (await win.isMinimized()) { await win.unminimize(); void toggle(); } });
 
   // ── recording state on the orb itself ──
   let tick = 0, started = 0;
@@ -340,7 +355,7 @@
     else if (open) { build(); }
   }
   listen('kakkoii://state', (e) => paint(e.payload));
-  listen('kakkoii://orb', () => void toggle());
+  listen('kakkoii://orb', () => { lastDown = Date.now(); void toggle(); }); // its focus isn't a taskbar click
   // The tray asking for something the orb knows how to do (with your settings).
   listen('kakkoii://do', (e) => { const it = items().find((i) => i.id === e.payload); if (it) it.run(); });
   listen('kakkoii://shot', () => { $('orb').classList.remove('flash'); void $('orb').offsetWidth; $('orb').classList.add('flash'); });

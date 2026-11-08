@@ -96,7 +96,7 @@
   const ORDER = ['balanced', 'high', 'small'];
   const BROWSERS = /chrome|msedge|firefox|brave|opera|vivaldi|arc/i;
   let quality = localStorage.getItem('quality') || 'balanced';
-  let sound = { system: localStorage.getItem('sound.system') !== 'off', mic: localStorage.getItem('sound.mic') === 'on' };
+  let sound = { system: localStorage.getItem('sound.system') !== 'off', mic: localStorage.getItem('sound.mic') !== 'off' };
   const toggleSound = (k) => { sound[k] = !sound[k]; localStorage.setItem('sound.' + k, sound[k] ? 'on' : 'off'); render(); };
   let state = { recording: false, camera: false };
   let windows = [], thumbs = {}, files = 0, sel = 0, shown = [], top = null;
@@ -228,7 +228,7 @@
   listen('kakkoii://open', () => {
     quality = localStorage.getItem('quality') || 'balanced';
     sound.system = localStorage.getItem('sound.system') !== 'off';
-    sound.mic = localStorage.getItem('sound.mic') === 'on';
+    sound.mic = localStorage.getItem('sound.mic') !== 'off';
     setTimeout(() => $('q').focus(), 30); void refresh();
   });
 
