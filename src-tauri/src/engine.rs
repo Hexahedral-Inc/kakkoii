@@ -20,6 +20,10 @@ pub struct StartOpts {
     pub target: Target,
     #[serde(default)]
     pub quality: Quality,
+    /// Saved size by its short side: 360, 480, 720, 1080, 1440, 2160. null keeps the
+    /// full size. Default 1080, never bigger than what's recorded.
+    #[serde(default = "full_hd")]
+    pub res: Option<u32>,
     /// System sound on, mic off, unless asked.
     #[serde(default)]
     pub sound: recorder::Sound,
@@ -29,6 +33,10 @@ pub struct StartOpts {
     pub max_seconds: Option<u64>,
     /// File name without extension. Default: kakkoii-<unix time>.
     pub name: Option<String>,
+}
+
+fn full_hd() -> Option<u32> {
+    Some(1080)
 }
 
 struct Live {
@@ -50,6 +58,8 @@ struct Inner {
     last: Option<String>,
     // What the bar asked for while the area picker is open.
     pending: Option<StartOpts>,
+    // After stop, how much of the file is written (0 to 1), until it's saved.
+    saving: Option<f64>,
 }
 
 pub struct Engine {
@@ -87,7 +97,7 @@ impl Engine {
                 "quality": l.quality,
                 "camera": inner.camera,
             }),
-            None => json!({ "recording": false, "camera": inner.camera, "last": inner.last }),
+            None => json!({ "recording": false, "camera": inner.camera, "last": inner.last, "saving": inner.saving }),
         }
     }
 
@@ -110,6 +120,9 @@ impl Engine {
         if self.inner.lock().unwrap().live.is_some() {
             return Err("already recording; stop first".into());
         }
+        if self.inner.lock().unwrap().saving.is_some() {
+            return Err("still saving the last video".into());
+        }
         // Just my face: a big camera window, and that window is what we record.
         let face_only = matches!(opts.target, Target::Face);
         if face_only {
@@ -125,7 +138,7 @@ impl Engine {
             let mut inner = self.inner.lock().unwrap();
             let name = opts.name.as_deref().map(safe_name).unwrap_or_else(|| format!("kakkoii-{}", now_secs()));
             let path = dir.join(format!("{name}.mp4")).to_string_lossy().into_owned();
-            let mut session = recorder::start(&opts.target, opts.quality, opts.sound, path)?;
+            let mut session = recorder::start(&opts.target, opts.quality, opts.res, opts.sound, path)?;
             if face_only {
                 session.label = "Your face".into();
             }
@@ -160,9 +173,51 @@ impl Engine {
     }
 
     pub fn stop(&self) -> Result<Value, String> {
-        let live = self.inner.lock().unwrap().live.take().ok_or("not recording")?;
+        let live = {
+            let mut inner = self.inner.lock().unwrap();
+            let live = inner.live.take().ok_or("not recording")?;
+            inner.saving = Some(0.0);
+            live
+        };
         let seconds = live.session.recorded(live.started);
-        let path = live.session.stop()?;
+        // Frames the encoder hasn't caught up on yet: the island and the orb show
+        // them being written as a ring, so a long save doesn't look like a stuck stop.
+        let pending = live.session.pending();
+        let saved_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        {
+            let app = self.app.clone();
+            let done = saved_flag.clone();
+            std::thread::spawn(move || {
+                use std::sync::atomic::Ordering;
+                let mut total = 0usize;
+                while !done.load(Ordering::Relaxed) {
+                    let left = pending.load(Ordering::Relaxed);
+                    total = total.max(left).max(1);
+                    let p = (1.0 - left as f64 / total as f64).min(0.97);
+                    if let Some(e) = app.try_state::<std::sync::Arc<Engine>>() {
+                        let mut inner = e.inner.lock().unwrap();
+                        if inner.saving.is_some() {
+                            inner.saving = Some(p);
+                        }
+                        let s = Self::status_of(&inner);
+                        drop(inner);
+                        let _ = app.emit("kakkoii://state", s);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+            });
+        }
+        let result = live.session.stop();
+        saved_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.inner.lock().unwrap().saving = None;
+        let path = match result {
+            Ok(p) => p,
+            Err(e) => {
+                self.island(false);
+                self.emit();
+                return Err(e);
+            }
+        };
         let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         self.inner.lock().unwrap().last = Some(path.clone());
         // Stopping a recording always puts the camera away.

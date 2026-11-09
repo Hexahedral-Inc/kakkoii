@@ -94,6 +94,9 @@
   const ORDER = ['balanced', 'high', 'small'];
   const BROWSERS = /chrome|msedge|firefox|brave|opera|vivaldi|arc/i;
   let quality = localStorage.getItem('quality') || 'balanced';
+  const RES = [[360, '360p'], [480, '480p'], [720, '720p'], [1080, '1080p'], [1440, '2K'], [2160, '4K']];
+  let res = +(localStorage.getItem('res') || 1080);
+  const resName = () => (RES.find(([r]) => r === res) || RES[3])[1];
   let sound = { system: localStorage.getItem('sound.system') !== 'off', mic: localStorage.getItem('sound.mic') !== 'off' };
   const toggleSound = (k) => { sound[k] = !sound[k]; localStorage.setItem('sound.' + k, sound[k] ? 'on' : 'off'); render(); };
   let state = { recording: false, camera: false };
@@ -101,7 +104,7 @@
 
   const hide = () => { $('q').value = ''; sel = 0; clearTimeout(picT); void win.hide(); };
   const record = async (opts) => {
-    try { top = null; await invoke('start_recording', { opts: { quality, sound: { ...sound }, ...opts } }); $('q').value = ''; }
+    try { top = null; await invoke('start_recording', { opts: { quality, res, sound: { ...sound }, ...opts } }); $('q').value = ''; }
     catch (e) { top = { err: String(e) }; render(); }
   };
 
@@ -115,12 +118,14 @@
       { id: 'screen', icon: 'record', red: true, short: 'Screen', text: 'Record the screen', hint: 'enter', run: () => record({ target: { kind: 'screen' } }) },
       { id: 'face', icon: 'face', short: 'Screen + face', text: 'Record the screen with my face', hint: 'face', run: () => record({ target: { kind: 'screen' }, camera: true, sound: { ...sound, mic: true } }) },
       { id: 'area', icon: 'area', short: 'Area', text: 'Record an area (drag a box)', hint: 'drag',
-        run: () => void invoke('pick_area', { opts: { quality, sound: { ...sound } } }).catch((e) => { top = { err: String(e) }; render(); }) },
+        run: () => void invoke('pick_area', { opts: { quality, res, sound: { ...sound } } }).catch((e) => { top = { err: String(e) }; render(); }) },
       { id: 'faceonly', icon: 'camera', short: 'Just my face', text: 'Record just my face', hint: 'camera', run: () => record({ target: { kind: 'face' }, sound: { ...sound, mic: true } }) },
     ];
     const tail = [
       { id: 'system', icon: sound.system ? 'speaker' : 'speakerOff', short: sound.system ? 'Sound on' : 'Sound off', text: sound.system ? 'Record the computer\'s sound' : 'Computer sound is off', hint: sound.system ? 'on' : 'off', on: sound.system, keep: true, run: () => toggleSound('system') },
       { id: 'mic', icon: sound.mic ? 'mic' : 'micOff', short: sound.mic ? 'Mic on' : 'Mic off', text: sound.mic ? 'Record my microphone' : 'Microphone is off', hint: sound.mic ? 'on' : 'off', on: sound.mic, keep: true, run: () => toggleSound('mic') },
+      { id: 'res', icon: 'quality', short: resName(), text: `Record in ${resName()}`, hint: 'change', keep: true,
+        run: () => { const i = RES.findIndex(([r]) => r === res); res = RES[(i + 1) % RES.length][0]; localStorage.setItem('res', String(res)); render(); } },
       { id: 'quality', icon: 'quality', short: QUALITY[quality].split(' · ')[0], text: `Quality: ${QUALITY[quality]}`, hint: 'change', keep: true,
         run: () => { quality = ORDER[(ORDER.indexOf(quality) + 1) % ORDER.length]; localStorage.setItem('quality', quality); render(); } },
       { id: 'bubble', icon: state.camera ? 'cameraOff' : 'camera', short: 'Face bubble', text: state.camera ? 'Hide my face bubble' : 'Show my face bubble', hint: state.camera ? 'on' : 'off', on: state.camera, keep: true,
@@ -230,6 +235,7 @@
   // The orb changes the same settings; pick them up each time the bar opens.
   listen('kakkoii://open', () => {
     quality = localStorage.getItem('quality') || 'balanced';
+    res = +(localStorage.getItem('res') || 1080);
     sound.system = localStorage.getItem('sound.system') !== 'off';
     sound.mic = localStorage.getItem('sound.mic') !== 'off';
     setTimeout(() => $('q').focus(), 30); void refresh();

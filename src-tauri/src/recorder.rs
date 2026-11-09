@@ -141,7 +141,14 @@ pub struct Rec {
     // The last frame we sent, and where a pause began, in capture ticks.
     last_ts: i64,
     pause_from: Option<i64>,
+    // Frames the encoder hasn't taken yet, and how many we skipped to keep up.
+    pending: Option<Arc<std::sync::atomic::AtomicUsize>>,
+    skipped: u64,
 }
+
+/// Past this many frames waiting (half a second at 60 fps), new ones are skipped,
+/// so a slow encoder costs smoothness while recording, not minutes after stop.
+const MAX_BEHIND: usize = 30;
 
 impl GraphicsCaptureApiHandler for Rec {
     type Flags = Flags;
@@ -149,7 +156,8 @@ impl GraphicsCaptureApiHandler for Rec {
 
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
         let encoder = ctx.flags.encoder.lock().unwrap().take();
-        Ok(Self { tail: ctx.flags.tail.clone(), flags: ctx.flags, encoder, done: false, first_at: Some(Instant::now()), frames: 0, last_ts: 0, pause_from: None })
+        let pending = encoder.as_ref().map(|e| e.pending_frames());
+        Ok(Self { tail: ctx.flags.tail.clone(), flags: ctx.flags, encoder, done: false, first_at: Some(Instant::now()), frames: 0, last_ts: 0, pause_from: None, pending, skipped: 0 })
     }
 
     fn on_frame_arrived(
@@ -178,6 +186,11 @@ impl GraphicsCaptureApiHandler for Rec {
             enc.add_time_offset((ts - from - ONE_FRAME).max(0));
         }
         self.last_ts = ts;
+        let stopping = self.flags.stop.load(Ordering::Relaxed);
+        if !stopping && self.pending.as_ref().is_some_and(|p| p.load(Ordering::Relaxed) > MAX_BEHIND) {
+            self.skipped += 1;
+            return Ok(());
+        }
         if let Some(enc) = self.encoder.as_mut() {
             if let Err(e) = enc.send_frame(frame) {
                 log(format!("send_frame failed after {} frames: {e}", self.frames));
@@ -206,7 +219,7 @@ impl GraphicsCaptureApiHandler for Rec {
 impl Rec {
     /// Saves the file and notes how long the recording really ran.
     fn finish_with_tail(&mut self) -> Result<(), BoxError> {
-        log(format!("finish: done={} frames={} since first={:?}", self.done, self.frames, self.first_at.map(|t| t.elapsed())));
+        log(format!("finish: done={} frames={} skipped={} since first={:?}", self.done, self.frames, self.skipped, self.first_at.map(|t| t.elapsed())));
         if self.done {
             return Ok(());
         }
@@ -230,6 +243,8 @@ pub struct Session {
     clock: Arc<std::sync::Mutex<PauseClock>>,
     tail: Arc<std::sync::Mutex<Option<Duration>>>,
     audio: Option<crate::audio::Audio>,
+    // Frames still waiting for the encoder: what's left to save after stop.
+    pending: Arc<std::sync::atomic::AtomicUsize>,
     pub path: String,
     pub label: String,
 }
@@ -269,14 +284,27 @@ where
     Rec::start_free_threaded(settings).map_err(|e| e.to_string())
 }
 
-fn encoder(w: u32, h: u32, quality: Quality, sound: bool, path: &str) -> Result<VideoEncoder, String> {
+/// The saved size for a resolution like 1080 (its short side), never bigger than what's recorded.
+pub fn out_size(w: u32, h: u32, res: Option<u32>) -> (u32, u32) {
+    let short = w.min(h).max(1);
+    match res {
+        Some(r) if r < short => ((w as u64 * r as u64 / short as u64) as u32, (h as u64 * r as u64 / short as u64) as u32),
+        _ => (w, h),
+    }
+}
+
+fn encoder(w: u32, h: u32, quality: Quality, res: Option<u32>, sound: bool, path: &str) -> Result<VideoEncoder, String> {
     // H.264 wants even sizes. Frames that differ later get padded by the encoder.
     let (w, h) = (w.max(2) & !1, h.max(2) & !1);
+    // Frames come in at w x h and the GPU scales them to the size asked for.
+    let (ow, oh) = out_size(w, h, res);
+    let (ow, oh) = (ow.max(2) & !1, oh.max(2) & !1);
     VideoEncoder::new(
-        VideoSettingsBuilder::new(w, h)
+        VideoSettingsBuilder::new(ow, oh)
+            .source_size(w, h)
             .sub_type(VideoSettingsSubType::H264)
             .frame_rate(quality.fps())
-            .bitrate(quality.bitrate(w, h)),
+            .bitrate(quality.bitrate(ow, oh).max(1_500_000)),
         // 48 kHz stereo 16-bit in, AAC out: what audio.rs hands over.
         AudioSettingsBuilder::default().disabled(!sound),
         ContainerSettingsBuilder::default(),
@@ -289,15 +317,18 @@ fn window_size(w: &Window) -> (u32, u32) {
     (w.width().unwrap_or(1280).max(2) as u32, w.height().unwrap_or(720).max(2) as u32)
 }
 
-pub fn start(target: &Target, quality: Quality, sound: Sound, path: String) -> Result<Session, String> {
+pub fn start(target: &Target, quality: Quality, res: Option<u32>, sound: Sound, path: String) -> Result<Session, String> {
     let stop = Arc::new(AtomicBool::new(false));
     let tail = Arc::new(std::sync::Mutex::new(None));
     let slot = Arc::new(std::sync::Mutex::new(None));
     let paused = Arc::new(AtomicBool::new(false));
     let clock = Arc::new(std::sync::Mutex::new(PauseClock::default()));
     let flags = Flags { encoder: slot.clone(), quality, stop: stop.clone(), paused: paused.clone(), clock: clock.clone(), tail: tail.clone() };
+    let pending = Arc::new(std::sync::Mutex::new(None));
     let ready = |w: u32, h: u32| -> Result<(), String> {
-        *slot.lock().unwrap() = Some(encoder(w, h, quality, sound.any(), &path)?);
+        let enc = encoder(w, h, quality, res, sound.any(), &path)?;
+        *pending.lock().unwrap() = Some(enc.pending_frames());
+        *slot.lock().unwrap() = Some(enc);
         Ok(())
     };
     let (control, label) = match target {
@@ -353,7 +384,8 @@ pub fn start(target: &Target, quality: Quality, sound: Sound, path: String) -> R
             }
         })
     });
-    Ok(Session { control, stop, paused, clock, tail, audio, path, label })
+    let pending = pending.lock().unwrap().take().unwrap_or_default();
+    Ok(Session { control, stop, paused, clock, tail, audio, pending, path, label })
 }
 
 impl Session {
@@ -378,6 +410,9 @@ impl Session {
     /// Seconds actually recorded, pauses left out.
     pub fn recorded(&self, started: Instant) -> f64 {
         started.elapsed().saturating_sub(self.clock.lock().unwrap().paused_for()).as_secs_f64()
+    }
+    pub fn pending(&self) -> Arc<std::sync::atomic::AtomicUsize> {
+        self.pending.clone()
     }
     pub fn is_finished(&self) -> bool {
         self.control.is_finished()

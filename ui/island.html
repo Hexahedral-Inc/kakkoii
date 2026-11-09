@@ -37,12 +37,21 @@
   .eq b { position: absolute; inset: 0; clip-path: inset(100% 0 0 0);
     background: linear-gradient(to top, #30d158 0 52%, #ffd60a 52% 78%, #ff453a 78%); filter: drop-shadow(0 0 3px rgba(48,209,88,.5)); }
   .held .eq { opacity: .35; }
+  /* Saving: the controls go, a ring fills as the file is written. */
+  .ring { display: none; flex: none; transform: rotate(-90deg); }
+  .ring circle { fill: none; stroke-width: 2.5; }
+  .ring .trk { stroke: rgba(255,255,255,.12); }
+  .ring .arc { stroke: #fff; stroke-linecap: round; transition: stroke-dashoffset .25s linear; }
+  .saving .ring { display: block; }
+  .saving .rec, .saving .eq, .saving .btn, .saving .stop { display: none; }
+  .saving { padding-right: 16px; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="cap" id="cap" data-tauri-drag-region>
     <span class="rec" data-tauri-drag-region></span>
+    <svg class="ring" width="18" height="18" viewBox="0 0 20 20" data-tauri-drag-region><circle class="trk" cx="10" cy="10" r="8"/><circle class="arc" id="arc" cx="10" cy="10" r="8" stroke-dasharray="50.27" stroke-dashoffset="50.27"/></svg>
     <span class="t mono" id="t" data-tauri-drag-region>0:00</span>
     <span class="eq" id="eq" title="Sound going into the video" data-tauri-drag-region><i><b></b></i><i><b></b></i><i><b></b></i><i><b></b></i><i><b></b></i></span>
     <span class="lbl" id="lbl" data-tauri-drag-region></span>
@@ -69,7 +78,16 @@
     $('pause').innerHTML = icon(paused ? 'play' : 'pause', 12);
     $('pause').classList.toggle('on', paused);
     $('cap').classList.toggle('held', paused);
-    if (s.recording) {
+    const saving = s.saving != null && !s.recording;
+    $('cap').classList.toggle('saving', saving);
+    if (saving) {
+      clearInterval(tick);
+      want.fill(0);
+      $('cap').classList.remove('out');
+      $('t').textContent = `${Math.round(s.saving * 100)}%`;
+      $('lbl').textContent = 'Saving your video';
+      $('arc').setAttribute('stroke-dashoffset', (50.27 * (1 - s.saving)).toFixed(2));
+    } else if (s.recording) {
       $('cap').classList.remove('out');
       started = Date.now() - s.seconds * 1000;
       $('lbl').textContent = paused ? 'Paused' : s.target === 'Screen' ? 'Recording the screen' : s.target;

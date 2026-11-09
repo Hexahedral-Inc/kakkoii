@@ -293,7 +293,7 @@ fn main() {
             Some(q) => recorder::Target::Window { query: q.clone() },
             None => recorder::Target::Screen,
         };
-        let session = recorder::start(&target, recorder::Quality::Balanced, recorder::Sound::default(), out).expect("start");
+        let session = recorder::start(&target, recorder::Quality::Balanced, Some(1080), recorder::Sound::default(), out).expect("start");
         std::thread::sleep(std::time::Duration::from_secs(secs));
         println!("{}", session.stop().expect("stop"));
         return;

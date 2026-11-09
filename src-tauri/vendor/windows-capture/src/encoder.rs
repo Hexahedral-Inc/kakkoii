@@ -1,6 +1,6 @@
 use std::fs::{self, File};
 use std::path::Path;
-use std::sync::atomic::{self, AtomicBool};
+use std::sync::atomic::{self, AtomicBool, AtomicUsize};
 use std::sync::{Arc, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -256,6 +256,7 @@ pub struct VideoSettingsBuilder {
     frame_rate: u32,
     pixel_aspect_ratio: (u32, u32),
     disabled: bool,
+    source: Option<(u32, u32)>,
 }
 
 impl VideoSettingsBuilder {
@@ -276,7 +277,15 @@ impl VideoSettingsBuilder {
             width,
             height,
             disabled: false,
+            source: None,
         }
+    }
+
+    /// Kakkoii: frames come in at this size and are scaled (on the GPU, by the
+    /// transcoder) to `width` x `height`. Defaults to the output size.
+    pub const fn source_size(mut self, width: u32, height: u32) -> Self {
+        self.source = Some((width, height));
+        self
     }
 
     /// Sets the video codec/subtype (e.g., [`VideoSettingsSubType::HEVC`]).
@@ -712,6 +721,8 @@ pub struct VideoEncoder {
     crop: Option<(u32, u32)>,
     // Kakkoii: time taken out by pauses, subtracted from every frame's timestamp.
     time_offset: i64,
+    // Kakkoii: frames sent but not yet taken by the encoder.
+    pending: Arc<AtomicUsize>,
 }
 
 impl VideoEncoder {
@@ -765,6 +776,7 @@ impl VideoEncoder {
         is_video_disabled: bool,
         is_audio_disabled: bool,
         frame_receiver: VideoFrameReceiver,
+        pending: Arc<AtomicUsize>,
         audio_receiver: AudioFrameReceiver,
         audio_block_align: u32,
         audio_sample_rate: u32,
@@ -828,9 +840,13 @@ impl VideoEncoder {
             } else {
                 let request_clone = request;
                 let frame_receiver = frame_receiver.clone();
+                let pending = pending.clone();
                 ThreadPool::RunWithPriorityAndOptionsAsync(
                     &WorkItemHandler::new(move |_| {
                         let value = frame_receiver.lock().recv();
+                        if matches!(value, Ok(Some(_))) {
+                            pending.fetch_sub(1, atomic::Ordering::Relaxed);
+                        }
                         match value {
                             Ok(Some((source, timestamp))) => {
                                 let sample = match source {
@@ -872,6 +888,8 @@ impl VideoEncoder {
         let path = path.as_ref();
         let media_encoding_profile = MediaEncodingProfile::new()?;
 
+        let (source_width, source_height) =
+            video_settings.source.unwrap_or((video_settings.width, video_settings.height));
         let (video_encoding_properties_cfg, is_video_disabled) = video_settings.build()?;
         media_encoding_profile.SetVideo(&video_encoding_properties_cfg)?;
         let (audio_encoding_properties_cfg, is_audio_disabled) = audio_settings.build()?;
@@ -879,15 +897,12 @@ impl VideoEncoder {
         let container_encoding_properties = container_settings.build()?;
         media_encoding_profile.SetContainer(&container_encoding_properties)?;
 
-        let target_width = video_encoding_properties_cfg.Width()?;
-        let target_height = video_encoding_properties_cfg.Height()?;
+        // The surface frames are copied into, and what the stream hands the transcoder.
+        let (target_width, target_height) = (source_width, source_height);
         let target_color_format = ColorFormat::Bgra8;
 
-        let video_encoding_properties = VideoEncodingProperties::CreateUncompressed(
-            &MediaEncodingSubtypes::Bgra8()?,
-            video_encoding_properties_cfg.Width()?,
-            video_encoding_properties_cfg.Height()?,
-        )?;
+        let video_encoding_properties =
+            VideoEncodingProperties::CreateUncompressed(&MediaEncodingSubtypes::Bgra8()?, source_width, source_height)?;
         let video_stream_descriptor = VideoStreamDescriptor::Create(&video_encoding_properties)?;
 
         // Stream descriptor uses PCM; the profile still encodes to AAC/OPUS/etc.
@@ -925,11 +940,13 @@ impl VideoEncoder {
         let frame_receiver = Arc::new(Mutex::new(frame_receiver_raw));
         let audio_receiver = Arc::new(Mutex::new(audio_receiver_raw));
 
+        let pending = Arc::new(AtomicUsize::new(0));
         let sample_requested = Self::attach_sample_requested_handlers(
             &media_stream_source,
             is_video_disabled,
             is_audio_disabled,
             frame_receiver,
+            pending.clone(),
             audio_receiver,
             audio_block_align,
             audio_sr,
@@ -988,6 +1005,7 @@ impl VideoEncoder {
             cached_surface: None,
             crop: None,
             time_offset: 0,
+            pending,
         })
     }
 
@@ -1076,11 +1094,13 @@ impl VideoEncoder {
         let frame_receiver = Arc::new(Mutex::new(frame_receiver_raw));
         let audio_receiver = Arc::new(Mutex::new(audio_receiver_raw));
 
+        let pending = Arc::new(AtomicUsize::new(0));
         let sample_requested = Self::attach_sample_requested_handlers(
             &media_stream_source,
             is_video_disabled,
             is_audio_disabled,
             frame_receiver,
+            pending.clone(),
             audio_receiver,
             audio_block_align,
             audio_sr,
@@ -1127,6 +1147,7 @@ impl VideoEncoder {
             cached_surface: None,
             crop: None,
             time_offset: 0,
+            pending,
         })
     }
 
@@ -1186,6 +1207,11 @@ impl VideoEncoder {
         self.crop = Some((x, y));
     }
 
+    /// Kakkoii: how many frames wait for the encoder (for a saving progress bar).
+    pub fn pending_frames(&self) -> Arc<AtomicUsize> {
+        self.pending.clone()
+    }
+
     /// Kakkoii: take `ticks` (100 ns units) out of the timeline, for a pause.
     pub fn add_time_offset(&mut self, ticks: i64) {
         self.time_offset += ticks;
@@ -1214,6 +1240,7 @@ impl VideoEncoder {
         };
 
         self.frame_sender.send(Some((VideoEncoderSource::DirectX(surface), timestamp)))?;
+        self.pending.fetch_add(1, atomic::Ordering::Relaxed);
 
         if self.error_notify.load(atomic::Ordering::Relaxed)
             && let Some(t) = self.transcode_thread.take()

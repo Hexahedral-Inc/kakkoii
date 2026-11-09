@@ -188,6 +188,7 @@ fn tools() -> Value {
               "area": { "type": "object", "description": "Record only this box of the primary display, in physical pixels: {x, y, w, h}.",
                         "properties": { "x": { "type": "integer" }, "y": { "type": "integer" }, "w": { "type": "integer" }, "h": { "type": "integer" } } },
               "quality": { "type": "string", "enum": ["high", "balanced", "small"], "description": "small = 30 fps, light files" },
+              "res": { "type": ["integer", "null"], "enum": [360, 480, 720, 1080, 1440, 2160, null], "description": "saved size by its short side; default 1080, null = full size" },
               "camera": { "type": "boolean", "description": "Show the face bubble on screen while recording." },
               "max_seconds": { "type": "integer", "description": "Stop on its own after this many seconds." },
               "system_audio": { "type": "boolean", "description": "Record what the computer plays (default true)." },

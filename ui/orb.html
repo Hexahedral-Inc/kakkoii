@@ -21,6 +21,9 @@
   #dot { transform-box: fill-box; transform-origin: center; }
   .rec #dot { animation: beat 1.2s ease-in-out infinite; filter: drop-shadow(0 0 14px rgba(255,59,48,.9)); }
   .held #dot { animation: none; opacity: .55; }
+  /* Saving: the ring fills white as the file is written, the time shows how far. */
+  .saving #dot { animation: none; opacity: .4; filter: none; }
+  .saving #dial .fill { stroke: #fff; }
   @keyframes beat { 0%, 100% { transform: scale(1) } 45% { transform: scale(1.32) } }
   .flash .k { animation: flash .6s ease-out; }
 
@@ -66,6 +69,7 @@
   .mini.red .chrome { background: conic-gradient(from 0deg, #ff6b61, #ff3b30 14%, #2a0605 32%, #9c9c9c 52%, #fff 58%, #444 74%, #ff3b30 90%, #ff6b61); }
   .mini.red { color: var(--rec); }
   .mini.off { color: var(--muted); }
+  .mini .res { position: relative; z-index: 1; font-size: 12px; font-weight: 750; letter-spacing: -.2px; font-variant-numeric: tabular-nums; text-shadow: 0 1px 1px #000; }
   .mini .lbl { position: absolute; top: 51px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 10.5px; font-weight: 600; letter-spacing: .2px;
     color: rgba(255,255,255,.8); text-shadow: 0 1px 3px #000, 0 0 8px #000, 0 0 2px #000; pointer-events: none; }
   .mini.lit .lbl { color: #fff; }
@@ -125,12 +129,18 @@
 
   // ── settings, shared with the bar through localStorage ──
   const QUALITY = { balanced: 'Balanced', high: 'High', small: 'Small' }, ORDER = ['balanced', 'high', 'small'];
+  // The saved size by its short side; the screen is recorded as is and scaled on the GPU.
+  const RES = [[360, '360p'], [480, '480p'], [720, '720p'], [1080, '1080p'], [1440, '2K'], [2160, '4K']];
   const get = () => ({
     quality: localStorage.getItem('quality') || 'balanced',
+    res: +(localStorage.getItem('res') || 1080),
     system: localStorage.getItem('sound.system') !== 'off',
     mic: localStorage.getItem('sound.mic') !== 'off',
   });
-  const opts = (extra = {}) => { const g = get(); return { quality: g.quality, sound: { system: g.system, mic: g.mic }, ...extra }; };
+  const opts = (extra = {}) => { const g = get(); return { quality: g.quality, res: g.res, sound: { system: g.system, mic: g.mic }, ...extra }; };
+  // What "Record in" starts once a size is picked.
+  let then = null;
+  const recordIn = (start) => () => { then = start; return go('res'); };
 
   let state = { recording: false, paused: false, camera: false, seconds: 0 };
   let keys = {}, grabbing = null; const keyMsg = {};
@@ -160,6 +170,11 @@
 
   function items() {
     const g = get();
+    if (page === 'res') return [
+      { id: 'back', icon: 'back', label: 'Back', keep: true, run: () => go('main') },
+      ...RES.map(([r, name]) => ({ id: `res-${r}`, text: name.replace('p', ''), label: name, red: r === g.res,
+        run: () => { localStorage.setItem('res', String(r)); page = 'main'; then?.(); } })),
+    ];
     if (page === 'settings') return [
       { id: 'back', icon: 'back', label: 'Back', keep: true, run: () => go('main') },
       { id: 'quality', icon: 'quality', label: QUALITY[g.quality], keep: true, run: () => localStorage.setItem('quality', ORDER[(ORDER.indexOf(g.quality) + 1) % 3]) },
@@ -190,10 +205,10 @@
       { id: 'hide', icon: 'hide', label: 'Hide orb', run: () => void win.hide() },
     ];
     return [
-      { id: 'screen', icon: 'record', label: 'Screen', red: true, run: () => void invoke('start_recording', { opts: opts({ target: { kind: 'screen' } }) }) },
-      { id: 'area', icon: 'area', label: 'Area', run: () => void invoke('pick_area', { opts: opts() }) },
+      { id: 'screen', icon: 'record', label: 'Screen', red: true, keep: true, run: recordIn(() => void invoke('start_recording', { opts: opts({ target: { kind: 'screen' } }) })) },
+      { id: 'area', icon: 'area', label: 'Area', keep: true, run: recordIn(() => void invoke('pick_area', { opts: opts() })) },
       { id: 'window', icon: 'window', label: 'A window', run: () => void invoke('show_bar') },
-      { id: 'withface', icon: 'face', label: 'With face', run: () => void invoke('start_recording', { opts: opts({ target: { kind: 'screen' }, camera: true, sound: { system: get().system, mic: true } }) }) },
+      { id: 'withface', icon: 'face', label: 'With face', keep: true, run: recordIn(() => void invoke('start_recording', { opts: opts({ target: { kind: 'screen' }, camera: true, sound: { system: get().system, mic: true } }) })) },
       { id: 'face', icon: 'camera', label: 'Just face', run: () => void invoke('start_recording', { opts: opts({ target: { kind: 'face' }, sound: { system: get().system, mic: true } }) }) },
       { id: 'shot', icon: 'shot', label: 'Screenshot', run: () => void invoke('capture', { mode: 'region' }) },
       { id: 'bubble', icon: state.camera ? 'camera' : 'cameraOff', label: 'Face bubble', off: !state.camera, keep: true, run: () => void invoke('set_camera', { on: !state.camera }) },
@@ -236,7 +251,7 @@
   function build() {
     list = items();
     $('ring').innerHTML = '<div class="bead" id="bead"></div>' + list.map((it, i) =>
-      `<div class="mini${it.red ? ' red' : ''}${it.off ? ' off' : ''}${it.danger ? ' danger' : ''}" data-i="${i}"><i class="chrome"></i>${icon(it.icon, 18)}<span class="lbl">${it.label}</span></div>`).join('');
+      `<div class="mini${it.red ? ' red' : ''}${it.off ? ' off' : ''}${it.danger ? ' danger' : ''}" data-i="${i}"><i class="chrome"></i>${it.text ? `<b class="res">${it.text}</b>` : icon(it.icon, 18)}<span class="lbl">${it.label}</span></div>`).join('');
     $('ring').querySelectorAll('.mini').forEach((el) => {
       el.onpointerenter = () => { hover = +el.dataset.i; el.classList.add('lit'); };
       el.onpointerleave = () => { if (hover === +el.dataset.i) hover = null; el.classList.remove('lit'); };
@@ -247,7 +262,7 @@
   async function pick(it) {
     if (it.keep) {
       await it.run();
-      if (!['back', 'settings', 'keys'].includes(it.id)) { const keepHover = hover; build(); hover = keepHover; frame(performance.now(), true); }
+      if (!['back', 'settings', 'keys', 'screen', 'area', 'withface'].includes(it.id)) { const keepHover = hover; build(); hover = keepHover; frame(performance.now(), true); }
       return;
     }
     await shut(true);
@@ -349,21 +364,28 @@
   function paint(s) {
     const was = state.recording;
     state = s;
-    $('orb').classList.toggle('rec', !!s.recording);
+    const saving = s.saving != null && !s.recording;
+    $('orb').classList.toggle('rec', !!s.recording || saving);
+    $('orb').classList.toggle('saving', saving);
     $('orb').classList.toggle('held', !!s.paused);
     clearInterval(tick);
     if (s.recording) {
       started = Date.now() - s.seconds * 1000;
       const upd = () => { const sec = Math.floor((Date.now() - started) / 1000); $('time').textContent = fmt(sec); dial(sec); };
       upd(); if (!s.paused) tick = setInterval(upd, 1000);
+    } else if (saving) {
+      $('time').textContent = `${Math.round(s.saving * 100)}%`;
+      dial(s.saving * LAP * 0.999);
     }
     if (open && was !== !!s.recording) { page = 'main'; build(); }
-    else if (open) { build(); }
+    else if (open && !saving) { build(); }
   }
   listen('kakkoii://state', (e) => paint(e.payload));
   listen('kakkoii://orb', () => { lastDown = Date.now(); void toggle(); }); // its focus isn't a taskbar click
   // The tray asking for something the orb knows how to do (with your settings).
-  listen('kakkoii://do', (e) => { const it = items().find((i) => i.id === e.payload); if (it) it.run(); });
+  listen('kakkoii://do', (e) => {
+    if (e.payload === 'screen') return void invoke('start_recording', { opts: opts({ target: { kind: 'screen' } }) });
+    const it = items().find((i) => i.id === e.payload); if (it) it.run(); });
   listen('kakkoii://shot', () => { $('orb').classList.remove('flash'); void $('orb').offsetWidth; $('orb').classList.add('flash'); });
 
   // First placement: last time's spot, else bottom right above the taskbar.
