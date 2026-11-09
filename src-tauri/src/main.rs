@@ -218,8 +218,11 @@ fn tray(app: &tauri::App, engine: Arc<Engine>) -> tauri::Result<()> {
             }
             // The orb starts it, with your quality and sound settings.
             "screen" => {
-                let _ = e.open_orb();
-                let _ = app.emit_to("orb", "kakkoii://do", "screen");
+                let (e, app) = (e.clone(), app.clone());
+                std::thread::spawn(move || {
+                    let _ = e.open_orb();
+                    let _ = app.emit_to("orb", "kakkoii://do", "screen");
+                });
             }
             "shot" => {
                 let app = app.clone();
@@ -326,7 +329,7 @@ fn main() {
                 let _ = bar.set_position(tauri::LogicalPosition::new(ax + (aw - 700.0) / 2.0, ay + ah - 132.0 - 26.0));
             }
             // Kakkoii lives in the orb; the bar comes up for typing a window name and for what was saved.
-            let _ = engine.open_orb();
+            engine.open_orb_soon();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -420,12 +420,28 @@ impl Engine {
     }
 
     /// The menu hotkey (Alt+K) and the tray icon: bring the orb back and open (or close) its menu.
+    /// Those callbacks (and a second launch) run on the main thread, and building the
+    /// orb window there freezes the app for good on Windows, so it's done on a thread.
     pub fn orb_menu(&self) {
-        let _ = self.open_orb();
-        if let Some(w) = self.app.get_webview_window("orb") {
-            let _ = w.set_focus();
-        }
-        let _ = self.app.emit_to("orb", "kakkoii://orb", ());
+        let app = self.app.clone();
+        std::thread::spawn(move || {
+            let Some(e) = app.try_state::<std::sync::Arc<Engine>>() else { return };
+            let _ = e.open_orb();
+            if let Some(w) = app.get_webview_window("orb") {
+                let _ = w.set_focus();
+            }
+            let _ = app.emit_to("orb", "kakkoii://orb", ());
+        });
+    }
+
+    /// `open_orb` off the main thread, for setup and the tray.
+    pub fn open_orb_soon(&self) {
+        let app = self.app.clone();
+        std::thread::spawn(move || {
+            if let Some(e) = app.try_state::<std::sync::Arc<Engine>>() {
+                let _ = e.open_orb();
+            }
+        });
     }
 
     /// An agent's screenshot: saved at once, with the sweep shown so you see it look.
