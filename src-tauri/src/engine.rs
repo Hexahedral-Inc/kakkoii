@@ -180,6 +180,7 @@ impl Engine {
             live
         };
         let seconds = live.session.recorded(live.started);
+        let (width, height) = live.session.size;
         // Frames the encoder hasn't caught up on yet: the island and the orb show
         // them being written as a ring, so a long save doesn't look like a stuck stop.
         let pending = live.session.pending();
@@ -226,7 +227,7 @@ impl Engine {
             self.close_camera();
             self.inner.lock().unwrap().camera = false;
         }
-        let saved = json!({ "file": path, "seconds": seconds, "bytes": bytes });
+        let saved = json!({ "file": path, "seconds": seconds, "bytes": bytes, "width": width, "height": height });
         self.island(false);
         let _ = self.app.emit("kakkoii://saved", &saved);
         self.emit();

@@ -29,7 +29,8 @@
   .win { padding: 5px; min-width: 0; }
   .win .pic { aspect-ratio: 16 / 10; border-radius: 9px; overflow: hidden; background: #0d0d0f; display: grid; place-items: center; color: var(--muted);
     box-shadow: inset 0 0 0 1px var(--line); }
-  .win .pic img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; animation: fadeIn .25s ease-out; }
+  .win .pic img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+  .win .pic img.fresh { animation: fadeIn .25s ease-out; }
   .win .cap { display: flex; align-items: center; gap: 6px; padding: 7px 3px 2px; min-width: 0; }
   .win .t { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
   .win.sel .t { color: var(--text); }
@@ -46,6 +47,7 @@
   .saved .what { flex: 1; min-width: 0; }
   .saved .name { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .saved .meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .saved .path { font-size: 10.5px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .75; }
   .chip { font-size: 11.5px; font-weight: 650; color: #fff; padding: 4px 11px; border-radius: 99px; border: 1px solid var(--line-strong);
     background: transparent; cursor: pointer; white-space: nowrap; transition: background .15s, transform .3s var(--spring); }
   .chip:hover { background: rgba(255,255,255,.08); }
@@ -83,9 +85,8 @@
 
   const { invoke } = window.__TAURI__.core;
   const { listen } = window.__TAURI__.event;
-  const { getCurrentWindow, LogicalSize, LogicalPosition } = window.__TAURI__.window;
+  const { getCurrentWindow } = window.__TAURI__.window;
   const win = getCurrentWindow();
-  const W = 700;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
@@ -101,6 +102,10 @@
   const toggleSound = (k) => { sound[k] = !sound[k]; localStorage.setItem('sound.' + k, sound[k] ? 'on' : 'off'); render(); };
   let state = { recording: false, camera: false };
   let windows = [], thumbs = {}, files = 0, sel = 0, shown = [], top = null;
+  // Redrawing the same thing replays every fade, which made the bar blink: only
+  // what changed is redrawn, and a picture fades in once, the first time it shows.
+  let lastList = '', lastTop = '';
+  const seen = new Set();
 
   const hide = () => { $('q').value = ''; sel = 0; clearTimeout(picT); void win.hide(); };
   const record = async (opts) => {
@@ -149,21 +154,30 @@
     sel = Math.max(0, Math.min(sel, shown.length - 1));
     let i = 0;
     const mode = (c) => `<div class="it mode${c.red ? ' red' : ''}" data-i="${i++}"><span class="lens">${icon(c.icon, 17)}</span><span class="t">${esc(c.short)}</span><span class="k mono">${esc(c.hint)}</span></div>`;
-    const win = (c) => `<div class="it win" data-i="${i++}" title="${esc(c.title || c.text)}"><div class="pic">${c.thumb ? `<img src="${c.thumb}" alt="" />` : icon(c.icon || 'window', 22)}</div><div class="cap"><span class="t">${esc(c.title || c.text)}</span>${c.hint ? `<span class="p mono">${esc(c.hint)}</span>` : ''}</div></div>`;
+    const win = (c) => `<div class="it win" data-i="${i++}" title="${esc(c.title || c.text)}"><div class="pic">${c.thumb ? `<img src="${c.thumb}" alt=""${seen.has(c.title) ? '' : ' class="fresh"'} />` : icon(c.icon || 'window', 22)}</div><div class="cap"><span class="t">${esc(c.title || c.text)}</span>${c.hint ? `<span class="p mono">${esc(c.hint)}</span>` : ''}</div></div>`;
     const opt = (c) => `<div class="it opt${c.on ? ' on' : ''}" data-i="${i++}">${icon(c.icon, 12)}<span>${esc(c.short || c.text)}</span>${c.hint && c.id === 'folder' ? `<span class="mono">${esc(c.hint)}</span>` : ''}</div>`;
-    $('list').innerHTML =
+    const list =
       (modes.length ? `<div class="sec">Record</div><div class="modes">${modes.map(mode).join('')}</div>` : '') +
       `<div class="sec">Windows <span>${q ? '' : 'type to find one'}</span></div>` +
       (ws.length ? `<div class="wins">${ws.map(win).join('')}</div>` : '<div class="none">No windows open</div>') +
       (opts.length ? `<div class="opts">${opts.map(opt).join('')}</div>` : '');
-    $('list').querySelectorAll('.it').forEach((r) => {
-      r.onmouseenter = () => { sel = +r.dataset.i; paintSel(); };
-      r.onclick = () => run(shown[+r.dataset.i]);
-    });
+    ws.forEach((c) => { if (c.thumb) seen.add(c.title); });
+    if (list !== lastList) {
+      lastList = list;
+      $('list').innerHTML = list;
+      $('list').querySelectorAll('.it').forEach((r) => {
+        r.onmouseenter = () => { sel = +r.dataset.i; paintSel(); };
+        r.onclick = () => run(shown[+r.dataset.i]);
+      });
+    }
     paintSel();
-    $('top').innerHTML = !top ? '' : top.err ? `<div class="err">${esc(top.err)}</div>`
+    const folder = top?.file ? top.file.replace(/[\\/][^\\/]*$/, '') : '';
+    const topHtml = !top ? '' : top.err ? `<div class="err">${esc(top.err)}</div>`
       : top.note ? `<div class="saved"><span class="ok">${icon('check', 12)}</span><div class="what"><div class="name">${esc(top.note)}</div></div></div>`
-      : `<div class="saved"><span class="ok">${icon('check', 12)}</span><div class="what"><div class="name">${esc(top.file.split(/[\\/]/).pop())}</div><div class="meta mono">${top.meta}</div></div>${/\.mp4$/i.test(top.file) ? '<button class="chip" id="trim">Trim</button>' : ''}<button class="chip" id="show">Show</button><button class="chip" id="copy">Copy path</button></div>`;
+      : `<div class="saved"><span class="ok">${icon('check', 12)}</span><div class="what"><div class="name">${esc(top.file.split(/[\\/]/).pop())}</div><div class="meta mono">${top.meta}</div><div class="path mono" title="${esc(top.file)}">${esc(folder)}</div></div>${/\.mp4$/i.test(top.file) ? '<button class="chip" id="trim">Trim</button>' : ''}<button class="chip" id="show">Show</button><button class="chip" id="copy">Copy path</button></div>`;
+    if (topHtml === lastTop) { $('cam').innerHTML = icon(state.camera ? 'camera' : 'cameraOff', 13); $('cam').classList.toggle('on', state.camera); return; }
+    lastTop = topHtml;
+    $('top').innerHTML = topHtml;
     if (top?.file) {
       if ($('trim')) $('trim').onclick = () => void invoke('open_trim', { file: top.file }).catch((e) => { top = { err: String(e) }; render(); });
       $('show').onclick = () => void invoke('reveal', { path: top.file });
@@ -225,11 +239,13 @@
   }
 
   const fmtLen = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+  // 1920x1080 → 1080p, 2560x1440 → 2K, 3840x2160 → 4K: by the short side.
+  const resLabel = (w, h) => { if (!w || !h) return ''; const s = Math.min(w, h); return s >= 2100 ? '4K' : s >= 1400 && s <= 1600 ? '2K' : `${s}p`; };
   const fmtSize = (b) => b > 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${(b / 1e6).toFixed(1)} MB`;
   listen('kakkoii://state', (e) => { state = e.payload; render(); });
   listen('kakkoii://saved', (e) => {
     const r = e.payload;
-    top = { file: r.file, meta: r.kind === 'screenshot' ? `Screenshot · ${r.width}×${r.height} · ${fmtSize(r.bytes)}` : `${fmtLen(r.seconds)} · ${fmtSize(r.bytes)}` };
+    top = { file: r.file, meta: r.kind === 'screenshot' ? `Screenshot · ${r.width}×${r.height} · ${fmtSize(r.bytes)}` : [fmtLen(r.seconds), resLabel(r.width, r.height), fmtSize(r.bytes)].filter(Boolean).join(' · ') };
     void refresh();
   });
   // The orb changes the same settings; pick them up each time the bar opens.
@@ -246,17 +262,7 @@
   win.onFocusChanged(({ payload }) => { if (payload) { focusedOnce = true; void refresh(); } else if (focusedOnce && !state.recording) hide(); });
 
   // The window grows upward with its content; the bottom edge stays where it is.
-  new ResizeObserver(async () => {
-    const el = $('body');
-    const scale = await win.scaleFactor();
-    const pos = (await win.outerPosition()).toLogical(scale);
-    const size = (await win.outerSize()).toLogical(scale);
-    const h = Math.ceil(el.offsetHeight);
-    if (Math.abs(h - size.height) < 2) return;
-    const bottom = pos.y + size.height;
-    await win.setSize(new LogicalSize(W, h));
-    await win.setPosition(new LogicalPosition(pos.x, bottom - h));
-  }).observe($('body'));
+  new ResizeObserver(() => void invoke('fit_bar', { height: Math.ceil($('body').offsetHeight) })).observe($('body'));
 
   invoke('status').then((s) => { state = s; render(); });
   void refresh();

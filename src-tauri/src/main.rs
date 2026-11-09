@@ -281,6 +281,25 @@ pub(crate) fn hide_from_capture(window: &tauri::WebviewWindow) {
     }
 }
 
+/// The bar grows upward with its content. Size and place in one move, so it
+/// never shows a frame at the new size in the old spot.
+#[cfg(windows)]
+#[tauri::command]
+fn fit_bar(window: tauri::WebviewWindow, height: f64) -> Result<(), String> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let pos = window.outer_position().map_err(|e| e.to_string())?;
+    let size = window.outer_size().map_err(|e| e.to_string())?;
+    let h = (height * scale).ceil() as i32;
+    if (h - size.height as i32).abs() < 2 {
+        return Ok(());
+    }
+    let bottom = pos.y + size.height as i32;
+    let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+    unsafe { SetWindowPos(hwnd.0 as _, std::ptr::null_mut(), pos.x, bottom - h, size.width as i32, h, SWP_NOZORDER | SWP_NOACTIVATE) };
+    Ok(())
+}
+
 #[cfg(windows)]
 fn main() {
 
@@ -334,7 +353,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             start_recording, stop_recording, pause_recording, ui_log, pick_area, area_chosen, set_camera, status, targets, recordings,
-            agent_command, open_folder, reveal, trim_recording, open_trim, show_bar, quit, capture, veil_image, veil_info, veil_done, veil_cancel, shot_info, shot_copy, hotkeys, set_hotkey, window_thumbs, mics, set_mic
+            agent_command, open_folder, reveal, trim_recording, open_trim, show_bar, quit, capture, veil_image, veil_info, veil_done, veil_cancel, fit_bar, shot_info, shot_copy, hotkeys, set_hotkey, window_thumbs, mics, set_mic
         ])
         .run(tauri::generate_context!())
         .expect("error while running kakkoii");

@@ -245,6 +245,8 @@ pub struct Session {
     audio: Option<crate::audio::Audio>,
     // Frames still waiting for the encoder: what's left to save after stop.
     pending: Arc<std::sync::atomic::AtomicUsize>,
+    /// The saved video's width and height.
+    pub size: (u32, u32),
     pub path: String,
     pub label: String,
 }
@@ -325,8 +327,11 @@ pub fn start(target: &Target, quality: Quality, res: Option<u32>, sound: Sound, 
     let clock = Arc::new(std::sync::Mutex::new(PauseClock::default()));
     let flags = Flags { encoder: slot.clone(), quality, stop: stop.clone(), paused: paused.clone(), clock: clock.clone(), tail: tail.clone() };
     let pending = Arc::new(std::sync::Mutex::new(None));
+    let size = std::sync::Mutex::new((0, 0));
     let ready = |w: u32, h: u32| -> Result<(), String> {
         let enc = encoder(w, h, quality, res, sound.any(), &path)?;
+        let (ow, oh) = out_size(w.max(2) & !1, h.max(2) & !1, res);
+        *size.lock().unwrap() = (ow.max(2) & !1, oh.max(2) & !1);
         *pending.lock().unwrap() = Some(enc.pending_frames());
         *slot.lock().unwrap() = Some(enc);
         Ok(())
@@ -385,7 +390,8 @@ pub fn start(target: &Target, quality: Quality, res: Option<u32>, sound: Sound, 
         })
     });
     let pending = pending.lock().unwrap().take().unwrap_or_default();
-    Ok(Session { control, stop, paused, clock, tail, audio, pending, path, label })
+    let size = *size.lock().unwrap();
+    Ok(Session { control, stop, paused, clock, tail, audio, pending, size, path, label })
 }
 
 impl Session {
